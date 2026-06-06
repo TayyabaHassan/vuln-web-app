@@ -1,4 +1,4 @@
-# Security Vulnerability Lab
+# Vulnerable Web Application Build via Claude Code
 
 An intentionally vulnerable web application designed to teach common security vulnerabilities through hands-on exploitation. Rather than studying vulnerabilities in theory, you'll exploit them in a working application to understand how real attacks work.
 
