@@ -1,0 +1,13 @@
+Read .claude/specs/dark-mode-toggle.md (and re-read docs/PRD.md, docs/TDD.md, and the
+frontend files it references: frontend/static/css/styles.css and
+frontend/templates/login.html, signup.html, dashboard.html).
+
+Based on the spec, write a detailed, phase-by-phase implementation plan and save it
+ONLY as .claude/specs/dark-mode-toggle-plan.md.
+
+Do NOT write or modify any source code in this step — produce the plan document only.
+The plan must list, per phase: the exact files to modify, the precise edits (with
+before/after snippets where helpful: CSS custom properties, [data-theme="dark"]
+overrides, the inline <head> init script, the toggle button + its click handler), and
+the verification steps from the spec. This task is ADDITIVE — the plan must NOT remove
+or fix any existing vulnerability.

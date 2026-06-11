@@ -1,0 +1,32 @@
+You are working in the cloned `vuln-web-app` repository (the v0.1.0 base release).
+
+READ first, to ground the spec in the real code and house style:
+- .claude/specs/app-foundation.md     (study its section structure and style)
+- frontend/static/css/styles.css
+- frontend/templates/login.html, signup.html, dashboard.html
+
+Then CREATE EXACTLY ONE file and nothing else: .claude/specs/dark-mode-toggle.md
+Do NOT write any source code, plan file, or modify any existing file.
+
+The spec MUST follow the same documentation style as .claude/specs/app-foundation.md
+and contain these sections, in order:
+  - Title and one-paragraph Overview / Purpose
+  - Scope & Non-Goals (state which of the 8 lab vulnerabilities are IN scope and
+    which intentionally remain unfixed)
+  - Affected Files (exact repository paths)
+  - Functional Requirements (FR-XX), Non-Functional Requirements (NFR-XX)
+  - Success Paths (SP-XX), Edge Cases (EC-XX), Acceptance Criteria (AC-XX)
+  - Test Cases (table: ID | Scenario | Precondition | Expected Result)
+  - Verification Steps (exact `uv run backend/app/main.py` command and URLs)
+
+Feature content:
+A light/dark theme toggle on the login, signup, and dashboard pages. Theme persisted
+in localStorage under key "theme"; restored before render to avoid a flash of the wrong
+theme; falls back to prefers-color-scheme when no saved value; keyboard accessible;
+aria-label reflects the current action. Implemented with CSS custom properties and a
+data-theme attribute on <html> — no framework. Affected files: frontend/static/css/styles.css
+and the three templates ONLY. This task is ADDITIVE and MUST NOT remove or fix any
+existing vulnerability — include a Test Case asserting an existing vulnerability is
+still intact (e.g. dashboard still renders a <script> username unescaped).
+
+Output only that one spec file. Confirm the path when done.

@@ -1,0 +1,4 @@
+Read .claude/specs/dark-mode-toggle-plan.md and implement it phase by phase, following
+it exactly. Only touch the files the plan names (frontend/static/css/styles.css and the
+three templates). After implementing, run through the plan's verification steps and
+report the result. Do NOT fix or alter any vulnerability — this task is additive only.
