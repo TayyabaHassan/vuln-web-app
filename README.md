@@ -56,6 +56,39 @@ vuln-web-app/
 
 ---
 
+## Releases & Versions
+
+This repository ships in two tagged releases. Pick the one that matches how you want to learn:
+
+| Version | Who it's for | What you get |
+|---------|--------------|--------------|
+| **v0.1.0** | Students who want to fix the vulnerabilities **from scratch** | The baseline vulnerable app with **all 8 intentional vulnerabilities open** (including the MD5 weak password storage). Your job is to find and patch each one yourself. |
+| **v0.1.1** | Students who want to **study a reference implementation** | Adds the **dark mode toggle** and replaces MD5 with **bcrypt** (VULN-5 fixed). Use it to compare against your own fixes or to see how the bcrypt patch was implemented. |
+
+### Download the version you want
+
+**Option A — Download a release archive (no Git required)**
+
+- v0.1.0: https://github.com/arifpucit/vuln-web-app/releases/tag/v0.1.0
+- v0.1.1: https://github.com/arifpucit/vuln-web-app/releases/tag/v0.1.1
+
+Download the `Source code (zip)` or `Source code (tar.gz)` asset for the version you want and extract it.
+
+**Option B — Clone the repo and check out the tag**
+
+```bash
+git clone https://github.com/arifpucit/vuln-web-app.git
+cd vuln-web-app
+
+# Work on the fully vulnerable baseline from scratch
+git checkout v0.1.0
+
+# Or study the version with dark mode + bcrypt
+git checkout v0.1.1
+```
+
+---
+
 ## Getting Started
 
 ### Prerequisites
@@ -69,6 +102,9 @@ vuln-web-app/
 # Clone the repository
 git clone https://github.com/arifpucit/vuln-web-app.git
 cd vuln-web-app
+
+# Check out the version you want (see "Releases & Versions" above)
+git checkout v0.1.0   # or: git checkout v0.1.1
 
 # Install dependencies
 uv sync
@@ -114,26 +150,6 @@ The app starts at **http://localhost:3001**. The database file (`vulnerable_app.
 | 7 | No Rate Limiting | A07:2021 - Auth Failures | Global — no throttling middleware | Open |
 | 8 | CSRF | A01:2021 - Access Control | Global — no CSRF tokens on forms | Open |
 
-### Fix Notes — Vulnerability #5 (Bcrypt)
-
-- `security.py` now uses bcrypt with `BCRYPT_ROUNDS = 12`. `hash_password()` returns a 60-char `$2b$12$…` string; `verify_password()` wraps `bcrypt.checkpw` in `try/except` so a legacy MD5 row returns `False` instead of crashing.
-- `auth_service.login()` no longer embeds the password hash in the SQL `WHERE` clause (bcrypt can't be matched with `=`). It fetches the user by username and compares with `verify_password()` in Python. The username branch of that query **remains string-concatenated**, so VULN-1 is unchanged.
-- After pulling this change, run `uv sync` to install `bcrypt`, then delete `vulnerable_app.db` and re-register — legacy MD5 accounts can no longer authenticate.
-
----
-
-## Features
-
-- User registration with client-side password confirmation
-- User login via async fetch with inline error display
-- Protected dashboard with personalized greeting
-- Vulnerability discovery checklist with color-coded tags
-- Responsive split-screen layout for auth pages
-- University-branded header with organization logos
-- SQLite database with automatic initialization
-- Database auto-recreated if deleted (on restart)
-- **Light / dark theme toggle** on login, signup, and dashboard pages — preference saved in `localStorage` under the key `theme`, restored before first paint to avoid FOUC, falls back to `prefers-color-scheme`, keyboard accessible, themed via CSS custom properties and a `data-theme` attribute on `<html>`
-
 ---
 
 ## Learning Path
@@ -170,6 +186,50 @@ Stop-Process -Id <PID> -Force
 
 ---
 
+## Bug Fixes
+
+The **weak password storage** bug (VULN-5: MD5 → bcrypt) is **already fixed** as of **v0.1.1**. The remaining **seven** vulnerabilities below are **still open** and are the ones you should patch.
+
+| # | Vulnerability | Description | Status |
+|---|---------------|-------------|--------|
+| 1 | Weak Password Storage | Passwords were hashed with unsalted MD5; replaced with bcrypt (cost 12). Login now verifies the hash in Python instead of matching it in the SQL query. | **Fixed (v0.1.1)** |
+| 2 | SQL Injection | `auth_service.py` builds queries with raw string concatenation; crafted input can read data or bypass authentication. Fix with parameterized/prepared queries. | Open |
+| 3 | Stored XSS | `auth.py` renders the username on the dashboard without escaping, so a malicious script persists in the database and executes for every viewer. Fix with output escaping/template auto-escape. | Open |
+| 4 | Reflected XSS | The `/search` endpoint echoes the `q` parameter back unescaped, executing injected scripts in the victim's browser. Fix by escaping reflected output. | Open |
+| 5 | Session Hijacking | `main.py` uses a hardcoded session secret key, making session cookies guessable/forgeable. Fix by loading a strong, random secret from the environment. | Open |
+| 6 | Exposed Database | `/download/db` serves the entire SQLite file with no authentication or authorization. Fix by removing the route or restricting it behind admin auth. | Open |
+| 7 | No Rate Limiting | There is no throttling middleware, leaving login open to brute-force and credential-stuffing attacks. Fix by adding per-IP/per-user rate limiting. | Open |
+| 8 | CSRF | Forms carry no CSRF tokens, allowing cross-site request forgery against authenticated users. Fix by issuing and validating CSRF tokens on all state-changing requests. | Open |
+
+---
+
+## Feature Enhancements
+
+The dark mode toggle is **done** (shipped in v0.1.1). The remaining items are **planned**.
+
+| # | Feature | Description | Status |
+|---|---------|-------------|--------|
+| 0 | Dark Mode Toggle | Light/dark theme toggle on login, signup, and dashboard pages; preference saved in `localStorage`, restored before first paint to avoid FOUC, with `prefers-color-scheme` fallback. | **Done (v0.1.1)** |
+| 1 | User Profile Page | A page where authenticated users can view and save their personal information and account settings. This also moves the dark-mode preference from per-browser (`localStorage`) to **per-user** — stored on the account so the theme choice follows the user across browsers and devices. | Planned |
+| 2 | Email Verification on Signup | During registration, send a confirmation email containing a verification token/link to confirm the address actually exists; the account is activated only after the user clicks the link. | Planned |
+| 3 | Password Strength Meter | A real-time indicator on the signup form that displays password strength and the acceptance criteria (length, complexity, character classes) as the user types. | Planned |
+| 4 | Change Password | A dedicated page that lets authenticated users change their password, verifying the current password before setting a new one. | Planned |
+| 5 | Continue with Google (OAuth 2.0) | Allow users to sign up and log in using their Google account via the OAuth 2.0 authorization flow. | Planned |
+| 6 | Continue with GitHub (OAuth 2.0) | Allow users to sign up and log in using their GitHub account via the OAuth 2.0 authorization flow. | Planned |
+| 7 | MFA via Authenticator App (TOTP) | Add two-factor authentication using a TOTP authenticator app (e.g., Google Authenticator or Authy) with QR-code enrollment. | Planned |
+| 8 | OTP via Email | Send a one-time passcode to the user's registered email as a second authentication factor during login. | Planned |
+| 9 | QR Code Login | Let users log in by scanning a QR code shown on the login page from an already-authenticated mobile device. | Planned |
+| 10 | CAPTCHA on Login | Add a CAPTCHA (e.g., Google reCAPTCHA or hCaptcha) to the login form to block automated and bot-driven login attempts. | Planned |
+| 11 | Account Lockout | Temporarily lock an account after a configured number of consecutive failed login attempts, with a cooldown timer before retry. | Planned |
+
+---
+
+## Legal Notice
+
+This application is provided strictly for educational purposes. Unauthorized access to computer systems is illegal. Ensure you have explicit permission before testing security vulnerabilities on any system you do not own. The authors are not responsible for misuse of this project.
+
+---
+
 ## Troubleshooting
 
 **`uv command not found`**
@@ -183,65 +243,3 @@ Run the app from the project root with `uv run backend/app/main.py`. The entry p
 
 **Database seems corrupted or stale**
 Delete `vulnerable_app.db` from the project root and restart the app. The database is recreated automatically on startup.
-
----
-
-## Future Enhancements
-
-### Completed
-
-| # | Feature / Fix | Branch | Notes |
-|---|---------------|--------|-------|
-| 1 | Dark Mode Toggle | `feature/dark-mode-toggle` | Light/dark themes with `localStorage` persistence, `prefers-color-scheme` fallback, no FOUC; see `.claude/specs/dark-mode-toggle.md` |
-| 2 | Bcrypt Password Hashing | `fix/bcrypt-password-hashing` | Closes VULN-5. MD5 replaced with bcrypt (cost 12); `login()` verifies in Python; see `.claude/specs/bcrypt-password-hashing.md` |
-
-### Feature Enhancements
-
-| # | Feature | Description |
-|---|---------|-------------|
-| 1 | Remember Me Checkbox | Keep session alive across browser restarts using persistent cookies |
-| 2 | Password Strength Meter | Real-time visual indicator showing password strength during signup |
-| 3 | Forgot Password (Email Link) | Send a password reset link to the user's registered email |
-| 4 | Email Verification on Signup | Send a verification email with a token link before activating the account |
-| 5 | User Profile Page | View and edit username, email, and avatar from a settings page |
-| 6 | Change Password | Allow authenticated users to update their password from the profile page |
-| 7 | Continue with Google (OAuth 2.0) | Sign up and login using Google account via OAuth 2.0 flow |
-| 8 | Continue with GitHub (OAuth 2.0) | Sign up and login using GitHub account via OAuth 2.0 flow |
-| 9 | Role-Based Access Control | Add admin and user roles with different dashboard permissions |
-| 10 | MFA via Authenticator App (TOTP) | Enable two-factor auth using Google Authenticator or Authy with QR code setup |
-| 11 | MFA Recovery Codes | Generate and display one-time backup codes during MFA enrollment |
-| 12 | OTP via Email | Send a one-time passcode to the user's email as a second authentication factor |
-| 13 | OTP via SMS | Send a one-time passcode to the user's registered phone number via Twilio |
-| 14 | QR Code Login | Scan a QR code on the login page from an authenticated mobile device to log in |
-| 15 | Session Management Dashboard | View and revoke active sessions across devices from the profile page |
-| 16 | Account Lockout | Lock the account after N failed login attempts with a cooldown timer |
-| 17 | Rate Limiting | Throttle requests per IP/user using middleware to prevent brute force attacks |
-| 18 | CAPTCHA on Login | Add Google reCAPTCHA or hCaptcha to the login form after failed attempts |
-| 19 | Audit Log | Record and display login attempts, password changes, and security events |
-| 20 | CSRF Protection | Add CSRF tokens to all forms to prevent cross-site request forgery |
-| 21 | Content Security Policy | Set CSP headers to mitigate XSS and injection attacks |
-| 22 | Account Deletion | Allow users to permanently delete their account and all associated data |
-| 23 | Admin User Management | Admin panel to view, deactivate, or delete user accounts |
-| 24 | API Key Authentication | Generate and manage personal API keys for programmatic access |
-| 25 | Magic Link Login | Passwordless login via a one-time link sent to the user's email |
-| 26 | Passkey / WebAuthn | Register and authenticate using biometrics or hardware security keys |
-| 27 | SSO with SAML | Enterprise single sign-on integration using SAML 2.0 protocol |
-
-### Bug Fixes
-
-| # | Issue | Description |
-|---|-------|-------------|
-| 1 | No Server-Side Password Confirmation | Confirm password is only validated client-side; server accepts any POST without matching check |
-| 2 | No Email Format Validation | Email field accepts any non-empty string with no format or domain validation |
-| 3 | No Password Strength Enforcement | No minimum length, complexity, or character requirements on passwords |
-| 4 | Empty Field Registration | Server allows registration with whitespace-only fields that pass the non-empty check |
-| 5 | No Connection Pooling | Each database operation opens a new SQLite connection instead of reusing from a pool |
-| 6 | Error Messages Leak Information | SQL errors and stack traces exposed to users via search endpoint error responses |
-| 7 | No Input Length Limits | Username, email, and password fields have no maximum length restriction |
-| 8 | Session Never Expires | Sessions persist indefinitely with no timeout or expiration mechanism |
-
----
-
-## Legal Notice
-
-This application is provided strictly for educational purposes. Unauthorized access to computer systems is illegal. Ensure you have explicit permission before testing security vulnerabilities on any system you do not own. The authors are not responsible for misuse of this project.
