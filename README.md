@@ -58,19 +58,23 @@ vuln-web-app/
 
 ## Releases & Versions
 
-This repository ships in two tagged releases. Pick the one that matches how you want to learn:
+This repository ships in several tagged releases. The three below are the main anchors — pick the one that matches how you want to learn:
 
 | Version | Who it's for | What you get |
 |---------|--------------|--------------|
 | **v0.1.0** | Students who want to fix the vulnerabilities **from scratch** | The baseline vulnerable app with **all 8 intentional vulnerabilities open** (including the MD5 weak password storage). Your job is to find and patch each one yourself. |
-| **v0.1.1** | Students who want to **study a reference implementation** | Adds the **dark mode toggle** and replaces MD5 with **bcrypt** (VULN-5 fixed). Use it to compare against your own fixes or to see how the bcrypt patch was implemented. |
+| **v0.1.1** | Students who want a **partial reference implementation** | Adds the **dark mode toggle** and replaces MD5 with **bcrypt** (VULN-5 fixed). A good starting point for comparing your own early fixes. |
+| **v1.0.0** | Students who want the **complete reference implementation** | All **8 vulnerabilities fixed** (SQLi, stored & reflected XSS, session hijacking, weak passwords, exposed DB, no rate limiting, CSRF). Study it to see how every patch was implemented. |
+
+The incremental tags between them (**v0.1.2 – v0.1.7**) each close one additional vulnerability — see the [Bug Fixes](#bug-fixes) table for the version-by-version mapping.
 
 ### Download the version you want
 
 **Option A — Download a release archive (no Git required)**
 
-- v0.1.0: https://github.com/arifpucit/vuln-web-app/releases/tag/v0.1.0
-- v0.1.1: https://github.com/arifpucit/vuln-web-app/releases/tag/v0.1.1
+- v0.1.0 (all vulnerabilities open): https://github.com/arifpucit/vuln-web-app/releases/tag/v0.1.0
+- v0.1.1 (dark mode + bcrypt): https://github.com/arifpucit/vuln-web-app/releases/tag/v0.1.1
+- v1.0.0 (all vulnerabilities fixed): https://github.com/arifpucit/vuln-web-app/releases/tag/v1.0.0
 
 Download the `Source code (zip)` or `Source code (tar.gz)` asset for the version you want and extract it.
 
@@ -83,8 +87,11 @@ cd vuln-web-app
 # Work on the fully vulnerable baseline from scratch
 git checkout v0.1.0
 
-# Or study the version with dark mode + bcrypt
+# Or study the partial reference (dark mode + bcrypt)
 git checkout v0.1.1
+
+# Or study the complete reference (all 8 vulnerabilities fixed)
+git checkout v1.0.0
 ```
 
 ---
@@ -104,7 +111,7 @@ git clone https://github.com/arifpucit/vuln-web-app.git
 cd vuln-web-app
 
 # Check out the version you want (see "Releases & Versions" above)
-git checkout v0.1.0   # or: git checkout v0.1.1
+git checkout v0.1.0   # baseline (all open) — or v0.1.1 (partial) / v1.0.0 (all fixed)
 
 # Install dependencies
 uv sync
@@ -186,7 +193,7 @@ Stop-Process -Id <PID> -Force
 ---
 
 ## Bug Fixes
-The **weak password storage** bug (VULN-5: MD5 → bcrypt) is **fixed** as of **v0.1.1**, the **SQL injection** vulnerability (VULN-1: string concatenation → parameterized queries) is **fixed** as of **v0.1.2**, the **exposed database** endpoint (VULN-6: unauthenticated `/download/db` → route removed) is **fixed** as of **v0.1.3**, the **session hijacking** vulnerability (VULN-4: hardcoded session secret → env-sourced secret with a strong random fallback) is **fixed** as of **v0.1.4**, the **stored XSS** vulnerability (VULN-2: unescaped dashboard username → HTML-escaped output) is **fixed** as of **v0.1.5**, the **reflected XSS** vulnerability (VULN-3: unescaped `/search` reflection → HTML-escaped output) is **fixed** as of **v0.1.6**, the **no rate limiting** vulnerability (VULN-7: no throttling → per-IP sliding-window POST rate limit returning HTTP 429) is **fixed** as of **v0.1.7**, and the **CSRF** vulnerability (VULN-8: no CSRF tokens → per-session synchronizer-token middleware returning HTTP 403) is **fixed** as of **v0.1.8**. **All 8 vulnerabilities are now closed**; the current codebase is a complete reference implementation. To study the original vulnerabilities, check out the `v0.1.0` tag (fully vulnerable baseline) and patch them yourself.
+The **weak password storage** bug (VULN-5: MD5 → bcrypt) is **fixed** as of **v0.1.1**, the **SQL injection** vulnerability (VULN-1: string concatenation → parameterized queries) is **fixed** as of **v0.1.2**, the **exposed database** endpoint (VULN-6: unauthenticated `/download/db` → route removed) is **fixed** as of **v0.1.3**, the **session hijacking** vulnerability (VULN-4: hardcoded session secret → env-sourced secret with a strong random fallback) is **fixed** as of **v0.1.4**, the **stored XSS** vulnerability (VULN-2: unescaped dashboard username → HTML-escaped output) is **fixed** as of **v0.1.5**, the **reflected XSS** vulnerability (VULN-3: unescaped `/search` reflection → HTML-escaped output) is **fixed** as of **v0.1.6**, the **no rate limiting** vulnerability (VULN-7: no throttling → per-IP sliding-window POST rate limit returning HTTP 429) is **fixed** as of **v0.1.7**, and the **CSRF** vulnerability (VULN-8: no CSRF tokens → per-session synchronizer-token middleware returning HTTP 403) is **fixed** as of **v1.0.0**. **All 8 vulnerabilities are now closed**; the current codebase is a complete reference implementation. To study the original vulnerabilities, check out the `v0.1.0` tag (fully vulnerable baseline) and patch them yourself.
 
 | # | Vulnerability | Description | Status |
 |---|---------------|-------------|--------|
@@ -197,7 +204,7 @@ The **weak password storage** bug (VULN-5: MD5 → bcrypt) is **fixed** as of **
 | 5 | Session Hijacking | `main.py` used a hardcoded session secret key, making session cookies guessable/forgeable. Fixed by loading `SECRET_KEY` from the environment with a strong `secrets.token_hex(32)` random fallback, so a fresh checkout never ships a known key. | **Fixed (v0.1.4)** |
 | 6 | Exposed Database | `/download/db` served the entire SQLite file with no authentication or authorization. Fixed by removing the route entirely. | **Fixed (v0.1.3)** |
 | 7 | No Rate Limiting | There was no throttling middleware, leaving login open to brute-force and credential-stuffing attacks. Fixed by adding a stdlib `RateLimitMiddleware` that enforces a per-IP sliding window on every POST (default 5 requests / 60 s), returning HTTP 429 with a `Retry-After` header before the handler runs. | **Fixed (v0.1.7)** |
-| 8 | CSRF | Forms carried no CSRF tokens, allowing cross-site request forgery against authenticated users. Fixed by adding a stdlib pure-ASGI `CSRFMiddleware` plus a per-session synchronizer token (`secrets.token_urlsafe(32)`) stored in `request.session["csrf_token"]`, spliced into a hidden field in the login and signup forms by the GET handlers, and validated on every POST with `secrets.compare_digest` — mismatches return HTTP 403 before the handler runs. | **Fixed (v0.1.8)** |
+| 8 | CSRF | Forms carried no CSRF tokens, allowing cross-site request forgery against authenticated users. Fixed by adding a stdlib pure-ASGI `CSRFMiddleware` plus a per-session synchronizer token (`secrets.token_urlsafe(32)`) stored in `request.session["csrf_token"]`, spliced into a hidden field in the login and signup forms by the GET handlers, and validated on every POST with `secrets.compare_digest` — mismatches return HTTP 403 before the handler runs. | **Fixed (v1.0.0)** |
 
 ---
 
