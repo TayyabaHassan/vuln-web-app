@@ -66,6 +66,7 @@
                 <p class="form-subtitle">Fill in your details to register for the lab</p>
 
                 <form id="signup-form" action="/signup" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{csrf_token}}">
                     <div class="form-group">
                         <label class="form-label" for="username">Username</label>
                         <input type="text" id="username" name="username" class="form-input" placeholder="Choose a username" required>

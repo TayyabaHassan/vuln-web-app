@@ -2,9 +2,9 @@
 
 ## Project Context
 
-This is an **intentionally vulnerable web application** for security education. It originally shipped with 8 OWASP Top 10 vulnerabilities. Seven of them — VULN-5 (Weak Password Storage), VULN-1 (SQL Injection), VULN-6 (Exposed DB), VULN-4 (Session Hijacking), VULN-2 (Stored XSS), VULN-3 (Reflected XSS), and VULN-7 (No Rate Limiting) — have since been closed. The other 1 remains intentionally exploitable for students to attack, understand, and remediate.
+This is an **intentionally vulnerable web application** for security education. It originally shipped with 8 OWASP Top 10 vulnerabilities. All 8 of them — VULN-5 (Weak Password Storage), VULN-1 (SQL Injection), VULN-6 (Exposed DB), VULN-4 (Session Hijacking), VULN-2 (Stored XSS), VULN-3 (Reflected XSS), VULN-7 (No Rate Limiting), and VULN-8 (CSRF) — have since been closed. No vulnerabilities remain intentionally exploitable; the project is now a complete "before / after" reference, with v0.1.0 as the fully vulnerable baseline.
 
-**WARNING:** The remaining 1 vulnerability is intentional. Do not "fix" it unless explicitly asked. The closed fixes (bcrypt password hashing, parameterized SQL, removed `/download/db` route, the hardened session secret, the escaped dashboard username, the escaped search output, and the per-IP POST rate-limit middleware) are permanent — do not revert them.
+**WARNING:** All eight closed fixes (bcrypt password hashing, parameterized SQL, removed `/download/db` route, the hardened session secret, the escaped dashboard username, the escaped search output, the per-IP POST rate-limit middleware, and the synchronizer-token CSRF middleware) are permanent — do not revert them. To study the original vulnerabilities, students should check out the `v0.1.0` tag rather than weakening the current codebase.
 
 ## Development Commands
 
@@ -48,7 +48,7 @@ frontend/
 | 5 | Weak Password | `backend/app/core/security.py` | Was MD5 (no salt); now bcrypt (`BCRYPT_ROUNDS = 12`); `verify_password` wraps `bcrypt.checkpw` in `try/except` so legacy MD5 rows return `False` instead of crashing | **Closed** |
 | 6 | Exposed DB | `backend/app/api/routes/auth.py` | Was an unauthenticated `/download/db` route; the route has been removed entirely | **Closed** |
 | 7 | No Rate Limit | `backend/app/core/rate_limit.py` + `backend/app/main.py` | Stdlib `RateLimitMiddleware` enforces a per-IP sliding window on every POST (default 5 / 60 s); throttled requests get HTTP 429 + `Retry-After` before the handler runs | **Closed** |
-| 8 | CSRF | Global | No CSRF tokens | Open |
+| 8 | CSRF | `backend/app/core/csrf.py` + `backend/app/main.py` + form templates | Synchronizer-token `CSRFMiddleware` rejects every POST whose `csrf_token` form field does not match `request.session["csrf_token"]`; token issued by `get_or_create_csrf_token` on `GET /login` / `GET /signup` and spliced into the rendered HTML | **Closed** |
 
 ### Login Flow After the Bcrypt Fix
 
@@ -93,6 +93,31 @@ app.add_middleware(
 - **No proxy-header trust:** `X-Forwarded-For` is intentionally ignored. If you front the app with a reverse proxy in a real deployment, configure the proxy to populate `request.client.host` (e.g., uvicorn's `--proxy-headers` with a trusted-IP allowlist) rather than trusting headers blindly.
 - **Local lab use:** run with no env overrides — the defaults are conservative enough to make brute-force impractical without locking out a user who mistypes their password a few times. To experiment, set `RATE_LIMIT_MAX=2 RATE_LIMIT_WINDOW_SECONDS=5` before launch.
 
+### CSRF Protection After the Fix
+
+`main.py` registers a stdlib-only **pure-ASGI** `CSRFMiddleware` (defined in `backend/app/core/csrf.py`) as the first `add_middleware` call, with `SessionMiddleware` second and `RateLimitMiddleware` last:
+
+```python
+app.add_middleware(CSRFMiddleware)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+app.add_middleware(
+    RateLimitMiddleware,
+    max_requests=RATE_LIMIT_MAX,
+    window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+)
+```
+
+Starlette's `add_middleware` prepends to its internal middleware list, so the *last* `add_middleware` call is the *outermost* layer on the request path. The resulting flow is `RateLimit (outer) → Session → CSRF (inner) → handler`. Rate-limit still gates floods first; CSRF reads the already-decoded session.
+
+- **Token:** `secrets.token_urlsafe(32)` — 256 bits of entropy, URL-safe Base64 (43 characters, `[A-Za-z0-9_-]`).
+- **Storage:** `request.session["csrf_token"]` — lives only inside the signed session cookie (VULN-4's `SECRET_KEY` signs the whole session dict). No database column, no in-process map.
+- **Issuance:** `GET /login` and `GET /signup` call `get_or_create_csrf_token(request)`, which lazily writes a token on first read and returns the existing value on subsequent reads (one token per session, not per request).
+- **Splice:** the handlers do `page.replace("{{csrf_token}}", html.escape(token, quote=True))` — same pattern as the `{{username}}` splice in `welcome_page`. The hidden input `<input type="hidden" name="csrf_token" value="{{csrf_token}}">` is the first child of each form.
+- **Validation:** on every POST, `CSRFMiddleware` drains the ASGI `receive` to buffer the body, parses the urlencoded body with `urllib.parse.parse_qs`, and compares the `csrf_token` value against `scope["session"]["csrf_token"]` with `secrets.compare_digest` (constant-time). Mismatch, missing field, empty field, wrong content-type, or any internal exception → HTTP `403` with body `{"error": "CSRF token missing or invalid"}` (fail-CLOSED). On success the same body bytes are replayed to the downstream handler via a wrapped `receive`. The middleware is pure ASGI rather than `BaseHTTPMiddleware` because the latter consumes the body on its own `Request` wrapper, leaving FastAPI's `Form(...)` dependency to see an empty stream.
+- **Scope:** every `POST` request. GET / HEAD / OPTIONS / static-file requests bypass with a single method-check.
+- **What it does not do:** no `Origin` / `Referer` header check, no double-submit cookie, no per-request rotation, no `SameSite` cookie-attribute change. The synchronizer token alone is sufficient on this single-origin lab.
+- **Local lab use:** no configuration needed. Visit `/login` or `/signup` and the token is issued automatically; subsequent forms in the same session reuse it.
+
 ## Frontend-Backend Integration
 
 - **Login**: `fetch()` POST → JSON response → client-side redirect
@@ -103,7 +128,7 @@ app.add_middleware(
 ## Important Rules
 
 - Always use parameterized queries in `auth_service.py` and `auth.py`. Never concatenate user-controlled input into SQL statements (VULN-1 is closed and must stay closed).
-- Never add CSRF tokens to forms (preserves VULN-8)
+- Never remove the CSRF middleware in `backend/app/main.py` / `backend/app/core/csrf.py`, the hidden `csrf_token` field in the login/signup templates, or the `get_or_create_csrf_token` calls in the two GET handlers. VULN-8 is closed by a session-bound synchronizer-token pattern: a 256-bit token (`secrets.token_urlsafe(32)`) is stored in `request.session["csrf_token"]`, spliced into every form, and validated on every POST with `secrets.compare_digest`. The middleware, the hidden field, and the splice are permanent and must stay (stdlib-only, no third-party CSRF dependency).
 - Never re-introduce a hardcoded session secret in `main.py`. VULN-4 is closed by sourcing `SECRET_KEY` from the environment with a strong `secrets.token_hex(32)` random fallback; the env-sourced secret is permanent and must stay (no constant key, no committed `.env`).
 - Never remove the rate-limit middleware in `backend/app/main.py` / `backend/app/core/rate_limit.py`. VULN-7 is closed by an in-process per-IP sliding-window `RateLimitMiddleware` scoped to every POST (default 5 requests per 60 s, tunable via `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_SECONDS` env vars). The middleware is permanent and must stay (stdlib-only, no third-party rate-limit dependency).
 - Never re-introduce MD5 or an "MD5 fallback" in `security.py`. Bcrypt is permanent; legacy MD5 rows must fail closed, not authenticate.
@@ -124,5 +149,6 @@ app.add_middleware(
 8. `.claude/specs/stored-xss-fix.md` + `.claude/specs/stored-xss-fix-plan.md` — VULN-2 fix
 9. `.claude/specs/reflected-xss-fix.md` + `.claude/specs/reflected-xss-fix-plan.md` — VULN-3 fix
 10. `.claude/specs/no-rate-limiting-fix.md` + `.claude/specs/no-rate-limiting-fix-plan.md` — VULN-7 fix
+11. `.claude/specs/csrf-fix.md` + `.claude/specs/csrf-fix-plan.md` — VULN-8 fix
 
 Prompts that generated each spec/plan/implementation live under `docs/prompts/`.
