@@ -93,7 +93,11 @@
             e.preventDefault();
             errorDiv.style.display = 'none';
 
-            const formData = new FormData(form);
+            // Send as application/x-www-form-urlencoded (not multipart). The
+            // CSRF middleware only parses urlencoded bodies, so wrapping the
+            // FormData in URLSearchParams makes the browser set the matching
+            // Content-Type and the csrf_token field is validated correctly.
+            const formData = new URLSearchParams(new FormData(form));
             const response = await fetch('/login', {
                 method: 'POST',
                 body: formData
