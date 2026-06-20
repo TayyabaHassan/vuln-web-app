@@ -91,7 +91,12 @@ def init_db():
             verification_token         TEXT,
             verification_token_expires REAL,
             failed_login_attempts      INTEGER DEFAULT 0,
-            locked_until               REAL
+            locked_until               REAL,
+            two_factor_enabled         INTEGER DEFAULT 0,
+            otp_code                   TEXT,
+            otp_expires                REAL,
+            otp_attempts               INTEGER DEFAULT 0,
+            otp_last_sent              REAL
         )"""
     )
 

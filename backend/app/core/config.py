@@ -1,5 +1,5 @@
 """Configuration + .env loading for the Continue-with-Google, Email
-Verification, and Account-Lockout features.
+Verification, Account-Lockout, and Email-OTP-2FA features.
 
 Stdlib only -- no python-dotenv dependency. This module:
 
@@ -11,6 +11,8 @@ Stdlib only -- no python-dotenv dependency. This module:
    ``is_email_configured()`` gate.
 4. Exposes the account-lockout thresholds (env-tunable, non-secret; no gate --
    the feature is always on with safe defaults).
+5. Exposes the Email-OTP-2FA settings (env-tunable, non-secret; no gate of their
+   own -- OTP delivery reuses ``is_email_configured()``).
 
 Design notes (production posture):
 - **Real environment variables always win** over ``.env`` values. A container,
@@ -130,3 +132,16 @@ ACCOUNT_LOCKOUT_MAX_ATTEMPTS = int(os.environ.get("ACCOUNT_LOCKOUT_MAX_ATTEMPTS"
 ACCOUNT_LOCKOUT_DURATION_SECONDS = int(
     os.environ.get("ACCOUNT_LOCKOUT_DURATION_SECONDS", "3600")
 )
+
+
+# --- Email OTP 2FA settings (env-tunable, non-secret) ------------------------
+# When a user enables Email OTP 2FA on their profile, a correct password issues a
+# 6-digit code emailed to them; login completes only after the code is verified.
+# These are NOT secrets and have no is_*_configured() gate of their own -- OTP
+# delivery reuses is_email_configured() (the same SMTP settings above). They have
+# safe defaults and can be lowered for demos, e.g.
+#   OTP_TTL_SECONDS=30 OTP_RESEND_COOLDOWN_SECONDS=5
+OTP_LENGTH = 6  # fixed: the feature is specified as a 6-digit code (not env-tunable).
+OTP_TTL_SECONDS = int(os.environ.get("OTP_TTL_SECONDS", "300"))
+OTP_MAX_ATTEMPTS = int(os.environ.get("OTP_MAX_ATTEMPTS", "5"))
+OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get("OTP_RESEND_COOLDOWN_SECONDS", "60"))
