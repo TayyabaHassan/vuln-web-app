@@ -101,6 +101,36 @@
                 <button type="submit" class="btn btn-primary" id="twofa-btn">…</button>
             </form>
         </div>
+
+        <!-- Authenticator App (TOTP, v1.0.7) -->
+        <div class="profile-card">
+            <h2 class="section-title">Authenticator App (TOTP)</h2>
+            <p class="notice-text" id="totp-status">Authenticator-app two-factor authentication is currently <strong id="totp-state">…</strong>.</p>
+            <p class="form-subtitle">Scan the QR with Google Authenticator, Authy, or a similar app, then confirm a code. No email needed.</p>
+            <div id="totp-message" class="profile-message" role="status" aria-live="polite" style="display: none;"></div>
+
+            <!-- Enrollment block: revealed after Set up; shows the QR + manual key
+                 and a confirm-code input. The QR is a server-generated PNG data
+                 URI (no user input); the secret is the user's own. -->
+            <div id="totp-enroll" style="display: none;">
+                <img id="totp-qr" alt="Authenticator QR code" style="max-width: 200px; margin: 12px 0;">
+                <p class="form-subtitle">Can't scan? Enter this key manually: <code id="totp-secret"></code></p>
+                <form id="totp-confirm-form">
+                    <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+                    <div class="form-group">
+                        <label class="form-label" for="totp-code">Enter the 6-digit code from the app</label>
+                        <input type="text" id="totp-code" name="code" class="form-input"
+                               inputmode="numeric" maxlength="6" pattern="[0-9]*" placeholder="123456">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Confirm &amp; enable</button>
+                </form>
+            </div>
+
+            <form id="totp-toggle-form">
+                <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+                <button type="submit" class="btn btn-primary" id="totp-btn">…</button>
+            </form>
+        </div>
     </main>
 
     <script>
@@ -213,6 +243,99 @@
                 }
                 msg.style.display = 'block';
                 render();
+            });
+        })();
+    </script>
+
+    <script>
+        // Authenticator App (TOTP) card (v1.0.7). Independent of the Email-OTP
+        // card above; at login TOTP takes precedence. The initial state comes from
+        // a server-spliced "0"/"1" flag (not user input). All POSTs go urlencoded
+        // with the hidden csrf_token (same pattern as the change-password form).
+        (function () {
+            var enabled = '{{totp_enabled}}' === '1';
+            var state = document.getElementById('totp-state');
+            var btn = document.getElementById('totp-btn');
+            var toggleForm = document.getElementById('totp-toggle-form');
+            var enroll = document.getElementById('totp-enroll');
+            var qrImg = document.getElementById('totp-qr');
+            var secretEl = document.getElementById('totp-secret');
+            var confirmForm = document.getElementById('totp-confirm-form');
+            var msg = document.getElementById('totp-message');
+
+            function notify(text, ok) {
+                msg.textContent = text;
+                msg.classList.remove('is-error', 'is-success');
+                msg.classList.add(ok ? 'is-success' : 'is-error');
+                msg.style.display = 'block';
+            }
+
+            function render() {
+                state.textContent = enabled ? 'enabled' : 'disabled';
+                btn.textContent = enabled ? 'Disable 2FA' : 'Set up authenticator';
+            }
+            render();
+
+            // Toggle button: enabled -> disable; disabled -> start setup (reveal QR).
+            toggleForm.addEventListener('submit', async function (e) {
+                e.preventDefault();
+                msg.style.display = 'none';
+                var body = new URLSearchParams(new FormData(toggleForm));
+                try {
+                    if (enabled) {
+                        var res = await fetch('/profile/totp/disable', { method: 'POST', body: body });
+                        var data = await res.json();
+                        if (data.success) {
+                            enabled = false;
+                            enroll.style.display = 'none';
+                            notify(data.message || 'Authenticator app disabled.', true);
+                        } else {
+                            notify(data.error || 'Could not update the setting.', false);
+                        }
+                        render();
+                    } else {
+                        var res2 = await fetch('/profile/totp/setup', { method: 'POST', body: body });
+                        var data2 = await res2.json();
+                        if (data2.success) {
+                            if (data2.qr_data_uri) {
+                                qrImg.src = data2.qr_data_uri;
+                                qrImg.style.display = '';
+                            } else {
+                                // QR render failed — manual entry still works.
+                                qrImg.style.display = 'none';
+                            }
+                            secretEl.textContent = data2.secret;
+                            enroll.style.display = 'block';
+                            notify('Scan the QR (or enter the key), then confirm a code below.', true);
+                        } else {
+                            notify(data2.error || 'Could not start enrollment.', false);
+                        }
+                    }
+                } catch (err) {
+                    notify('Something went wrong. Please try again.', false);
+                }
+            });
+
+            // Confirm code: activates TOTP on success.
+            confirmForm.addEventListener('submit', async function (e) {
+                e.preventDefault();
+                msg.style.display = 'none';
+                var body = new URLSearchParams(new FormData(confirmForm));
+                try {
+                    var res = await fetch('/profile/totp/confirm', { method: 'POST', body: body });
+                    var data = await res.json();
+                    if (data.success) {
+                        enabled = true;
+                        enroll.style.display = 'none';
+                        confirmForm.reset();
+                        notify(data.message || 'Authenticator app enabled.', true);
+                        render();
+                    } else {
+                        notify(data.error || 'That code did not match.', false);
+                    }
+                } catch (err) {
+                    notify('Something went wrong. Please try again.', false);
+                }
             });
         })();
     </script>

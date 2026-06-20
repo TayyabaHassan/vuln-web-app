@@ -88,6 +88,15 @@ def init_db():
       reaches OTP_MAX_ATTEMPTS.
     - `otp_last_sent REAL`: Unix epoch seconds of the most recent OTP send, used
       to enforce the per-account resend cooldown, or NULL.
+    - `totp_secret TEXT`: the base32 authenticator-app TOTP shared secret
+      (MFA-via-Authenticator-App feature, v1.0.7). Set as *pending* when
+      enrollment starts, persists while enrolled, NULL when the user has none.
+    - `totp_enabled INTEGER DEFAULT 0`: 1 only after a confirm code validated the
+      secret; 0 while disabled or while a secret is pending (generated but not yet
+      confirmed). Defaults to 0, so existing rows need no grandfather UPDATE.
+    - `totp_last_step INTEGER`: the last accepted TOTP time-step counter, for
+      replay protection (a code already used cannot be reused inside its window);
+      NULL until the first successful verify.
     """
     conn = get_db()
     conn.execute(
@@ -109,7 +118,10 @@ def init_db():
             otp_code                   TEXT,
             otp_expires                REAL,
             otp_attempts               INTEGER DEFAULT 0,
-            otp_last_sent              REAL
+            otp_last_sent              REAL,
+            totp_secret                TEXT,
+            totp_enabled               INTEGER DEFAULT 0,
+            totp_last_step             INTEGER
         )"""
     )
 
@@ -141,6 +153,13 @@ def init_db():
         "otp_expires": "ALTER TABLE users ADD COLUMN otp_expires REAL",
         "otp_attempts": "ALTER TABLE users ADD COLUMN otp_attempts INTEGER DEFAULT 0",
         "otp_last_sent": "ALTER TABLE users ADD COLUMN otp_last_sent REAL",
+        # MFA via Authenticator App (TOTP) feature (v1.0.7): three columns. The
+        # defaults (NULL / 0 / NULL) already mean "no secret, TOTP off, never
+        # used", so -- like the lockout/otp columns -- NO grandfather UPDATE is
+        # needed; existing rows are correct as-is.
+        "totp_secret": "ALTER TABLE users ADD COLUMN totp_secret TEXT",
+        "totp_enabled": "ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0",
+        "totp_last_step": "ALTER TABLE users ADD COLUMN totp_last_step INTEGER",
     }
     for column, ddl in migrations.items():
         if column not in existing:

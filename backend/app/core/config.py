@@ -1,5 +1,6 @@
 """Configuration + .env loading for the Continue-with-Google, Email
-Verification, Account-Lockout, and Email-OTP-2FA features.
+Verification, Account-Lockout, Email-OTP-2FA, and Authenticator-App-TOTP-2FA
+features.
 
 Stdlib only -- no python-dotenv dependency. This module:
 
@@ -13,6 +14,8 @@ Stdlib only -- no python-dotenv dependency. This module:
    the feature is always on with safe defaults).
 5. Exposes the Email-OTP-2FA settings (env-tunable, non-secret; no gate of their
    own -- OTP delivery reuses ``is_email_configured()``).
+6. Exposes the Authenticator-App-TOTP settings (env-tunable, non-secret; no gate
+   -- TOTP needs neither SMTP nor Google, so the feature is always available).
 
 Design notes (production posture):
 - **Real environment variables always win** over ``.env`` values. A container,
@@ -145,3 +148,18 @@ OTP_LENGTH = 6  # fixed: the feature is specified as a 6-digit code (not env-tun
 OTP_TTL_SECONDS = int(os.environ.get("OTP_TTL_SECONDS", "300"))
 OTP_MAX_ATTEMPTS = int(os.environ.get("OTP_MAX_ATTEMPTS", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get("OTP_RESEND_COOLDOWN_SECONDS", "60"))
+
+
+# --- MFA via Authenticator App (TOTP) settings (env-tunable, non-secret) ------
+# When a user enrolls an authenticator app (Google Authenticator, Authy, ...), a
+# correct password issues a TOTP challenge instead of completing login. These are
+# NOT secrets and have NO is_*_configured() gate -- TOTP needs neither SMTP nor
+# Google, so the feature is always available with safe defaults. The per-user
+# shared secret is generated at enrollment (secrets.token_bytes) and stored on the
+# users row. TOTP math is RFC 4226/6238 in pure stdlib; only the QR image uses the
+# `segno` dependency. At login TOTP takes precedence over Email OTP (v1.0.6).
+TOTP_ISSUER = os.environ.get("TOTP_ISSUER", "Security Vulnerability Lab")
+TOTP_PERIOD_SECONDS = int(os.environ.get("TOTP_PERIOD_SECONDS", "30"))
+TOTP_SKEW_STEPS = int(os.environ.get("TOTP_SKEW_STEPS", "1"))
+TOTP_DIGITS = 6        # fixed: authenticator-app default (not env-tunable).
+TOTP_SECRET_BYTES = 20  # fixed: 160-bit secret (RFC 6238 norm), base32 in the QR.

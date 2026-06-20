@@ -71,8 +71,32 @@ This repository ships in several tagged releases. The versions below are the mai
 | **v1.0.4** | Students who want the reference **plus email verification** | Everything in v1.0.3 plus **Email Verification on Signup**: registration sends a single-use, 1-hour confirmation link over SMTP (stdlib only, no new dependency); accounts are created *unverified* and **cannot log in until the link is clicked**, with a credential-checked **Resend** button on the login page. Google accounts are auto-verified; the signup page shows a friendly setup page when SMTP isn't configured. Second DB-schema change (3 columns on `users`). |
 | **v1.0.5** | Students who want the reference **plus account lockout** | Everything in v1.0.4 plus **Account Lockout**: after a configurable number of consecutive failed logins (default **6**) a single account is temporarily locked (default **1 hour**, then auto-unlocks), refusing authentication even with the correct password and showing a countdown. The lock is checked *before* bcrypt and shared between login and the verification-resend endpoint. A per-**account** layer that **complements — does not replace — the per-IP rate limiter (VULN-7)**. Third DB-schema change (2 columns on `users`); stdlib only, no new dependency. |
 | **v1.0.6** | Students who want the reference **plus email OTP 2FA** | Everything in v1.0.5 plus **Email OTP Two-Factor Authentication**: a user can opt in from their profile, after which a correct password no longer logs them in directly — the app emails a **6-digit one-time code** (5-min expiry, 5-attempt cap, 60-s resend cooldown — all env-tunable) and completes login only after the code is verified on a dedicated screen. The challenge runs *after* bcrypt + the email-verified gate; the session is promoted only post-OTP (**session-only, no JWT**). Fourth DB-schema change (5 columns on `users`); stdlib only, no new dependency. |
+| **v1.0.7** | Students who want the reference **plus authenticator-app 2FA** | Everything in v1.0.6 plus **MFA via Authenticator App (TOTP)**: a user enrolls Google Authenticator / Authy by scanning a **QR code** on their profile and confirming one code; thereafter a correct password issues a **TOTP challenge** on a dedicated `/login/totp` screen instead of completing login. **Independent of Email OTP and takes precedence** when both are on (no email sent); it needs **no SMTP and no Google**, so it works on a fresh clone. TOTP math is pure stdlib; the **only new dependency is `segno`** (pure-Python QR). Session-only (no JWT); replay-guarded. Fifth DB-schema change (3 columns on `users`). |
 
-The incremental tags between them (**v0.1.2 – v0.1.7**) each close one additional vulnerability — see the [Bug Fixes](#bug-fixes) table for the version-by-version mapping. The feature-enhancement tags build on top of v1.0.0: **v1.0.1** adds the password strength meter, **v1.0.2** the User Profile Page, **v1.0.3** Continue with Google, **v1.0.4** Email Verification on Signup, **v1.0.5** Account Lockout, and **v1.0.6** Email OTP 2FA.
+The incremental tags between them (**v0.1.2 – v0.1.7**) each close one additional vulnerability — see the [Bug Fixes](#bug-fixes) table for the version-by-version mapping. The feature-enhancement tags build on top of v1.0.0: **v1.0.1** adds the password strength meter, **v1.0.2** the User Profile Page, **v1.0.3** Continue with Google, **v1.0.4** Email Verification on Signup, **v1.0.5** Account Lockout, **v1.0.6** Email OTP 2FA, and **v1.0.7** MFA via Authenticator App (TOTP).
+
+### Version History (every tag)
+
+Every release tag, in order, and exactly what it introduced — each bug fix and each feature is traceable to the tag that shipped it.
+
+| Tag | Type | Change | Details |
+|-----|------|--------|---------|
+| **v0.1.0** | Baseline | Fully vulnerable app — **all 8 vulnerabilities open** | The starting point for fixing from scratch |
+| **v0.1.1** | Feature + Fix | **Dark Mode Toggle** + **VULN-5** Weak Password Storage (MD5 → bcrypt cost 12) | First feature and first vuln closed together |
+| **v0.1.2** | Bug Fix | **VULN-1** SQL Injection (string concatenation → parameterized queries) | `auth_service.py` |
+| **v0.1.3** | Bug Fix | **VULN-6** Exposed Database (unauthenticated `/download/db` → route removed) | `auth.py` |
+| **v0.1.4** | Bug Fix | **VULN-4** Session Hijacking (hardcoded secret → env-sourced `SECRET_KEY` + random fallback) | `main.py` |
+| **v0.1.5** | Bug Fix | **VULN-2** Stored XSS (unescaped dashboard username → HTML-escaped output) | `auth.py` |
+| **v0.1.6** | Bug Fix | **VULN-3** Reflected XSS (unescaped `/search` reflection → HTML-escaped output) | `auth.py` |
+| **v0.1.7** | Bug Fix | **VULN-7** No Rate Limiting (→ per-IP sliding-window POST limit, HTTP 429) | `core/rate_limit.py` + `main.py` |
+| **v1.0.0** | Bug Fix | **VULN-8** CSRF (→ per-session synchronizer-token middleware, HTTP 403) — **all 8 vulnerabilities now closed** | `core/csrf.py` + `main.py` + forms |
+| **v1.0.1** | Feature | **Password Strength Meter** (signup, frontend-only, advisory) | No schema change |
+| **v1.0.2** | Feature | **User Profile Page** (`/profile`: view info + change password) | No schema change |
+| **v1.0.3** | Feature | **Continue with Google** (OAuth 2.0 + OpenID Connect via Authlib) | 1st schema change (4 cols) |
+| **v1.0.4** | Feature | **Email Verification on Signup** (single-use 1-hour SMTP link) | 2nd schema change (3 cols) |
+| **v1.0.5** | Feature | **Account Lockout** (per-account lock after N failed logins) | 3rd schema change (2 cols) |
+| **v1.0.6** | Feature | **Email OTP 2FA** (opt-in 6-digit emailed code after password) | 4th schema change (5 cols) |
+| **v1.0.7** | Feature | **MFA via Authenticator App (TOTP)** (QR enrollment; TOTP wins over Email OTP; `segno` dep) | 5th schema change (3 cols) |
 
 ### Download the version you want
 
@@ -197,6 +221,31 @@ build the link. The real `.env` is **git-ignored** — never commit your secret;
 
 ---
 
+## Authenticator App (TOTP) — Setup (optional, no config required)
+
+As of **v1.0.7** a user can add **authenticator-app two-factor authentication**
+(RFC 6238 TOTP). Unlike Email OTP and Continue-with-Google, this needs **no
+SMTP and no Google credentials** — it works on a fresh clone out of the box:
+
+1. Log in and open **`/profile`** → the **Authenticator App (TOTP)** card.
+2. Click **Set up authenticator**, scan the QR with Google Authenticator / Authy
+   / 1Password (or type the shown key), then enter the current 6-digit code to
+   **confirm & enable**.
+3. On your next login, after your password you'll be asked for the current code
+   on **`/login/totp`**.
+
+It is **independent of Email OTP**; if both are enabled, **TOTP takes
+precedence** (no email is sent). The TOTP math is pure standard library; the one
+new dependency is **`segno`** (pure-Python, zero transitive deps) used only to
+render the QR image. Optional, non-secret tunables (`TOTP_ISSUER`,
+`TOTP_PERIOD_SECONDS`, `TOTP_SKEW_STEPS`) are documented in `.env.example`.
+
+> Lost your authenticator? This slice has no self-service recovery — an operator
+> clears `totp_secret` / `totp_enabled` on your `users` row (e.g.
+> `sqlite3 vulnerable_app.db "UPDATE users SET totp_secret=NULL, totp_enabled=0 WHERE username='you';"`).
+
+---
+
 ## API Endpoints
 
 | Method | Endpoint | Description | Auth Required |
@@ -210,9 +259,14 @@ build the link. The real `.env` is **git-ignored** — never commit your secret;
 | GET | `/profile` | Authenticated profile page (view info + change password + 2FA toggle) | Yes |
 | POST | `/profile/password` | Change the logged-in user's password (returns JSON) | Yes |
 | POST | `/profile/2fa` | Enable/disable Email OTP 2FA for the logged-in user (returns JSON) | Yes |
-| GET | `/login/otp` | OTP entry screen shown mid-login when 2FA is on (pending session) | Pending 2FA |
-| POST | `/login/otp` | Verify the 6-digit OTP and complete the login (returns JSON) | Pending 2FA |
+| POST | `/profile/totp/setup` | Begin authenticator-app (TOTP) enrollment; returns QR + manual key (JSON) | Yes |
+| POST | `/profile/totp/confirm` | Confirm enrollment with a current code, activating TOTP (returns JSON) | Yes |
+| POST | `/profile/totp/disable` | Disable authenticator-app (TOTP) 2FA (returns JSON) | Yes |
+| GET | `/login/otp` | OTP entry screen shown mid-login when Email OTP 2FA is on (pending session) | Pending 2FA |
+| POST | `/login/otp` | Verify the 6-digit email OTP and complete the login (returns JSON) | Pending 2FA |
 | POST | `/login/otp/resend` | Re-send the login OTP (honours the per-account cooldown; returns JSON) | Pending 2FA |
+| GET | `/login/totp` | Authenticator-code entry screen shown mid-login when TOTP is on (pending session) | Pending 2FA |
+| POST | `/login/totp` | Verify the 6-digit TOTP code and complete the login (returns JSON) | Pending 2FA |
 | GET | `/check-email` | "Check your inbox" page shown right after signup | No |
 | GET | `/verify?token=` | Confirm an email-verification link (single-use, 1-hour token) | No |
 | POST | `/verify/resend` | Re-send the verification email to the logged-in user (returns JSON) | Yes |
@@ -290,20 +344,24 @@ The **weak password storage** bug (VULN-5: MD5 → bcrypt) is **fixed** as of **
 
 ## Feature Enhancements
 
-The dark mode toggle (v0.1.1), password strength meter (v1.0.1), User Profile Page (v1.0.2), Continue with Google (v1.0.3), Email Verification on Signup (v1.0.4), Account Lockout (v1.0.5), and Email OTP 2FA (v1.0.6) are **done** — see the Status column. The remaining items are **planned**.
+The dark mode toggle (v0.1.1), password strength meter (v1.0.1), User Profile Page (v1.0.2), Continue with Google (v1.0.3), Email Verification on Signup (v1.0.4), Account Lockout (v1.0.5), Email OTP 2FA (v1.0.6), and MFA via Authenticator App / TOTP (v1.0.7) are **done** — see the Status column. The remaining items are **planned**.
 
-| # | Feature | Description | Status |
-|---|---------|-------------|--------|
-| 0 | Dark Mode Toggle | Light/dark theme toggle on login, signup, and dashboard pages; preference saved in `localStorage`, restored before first paint to avoid FOUC, with `prefers-color-scheme` fallback. | **Done (v0.1.1)** |
-| 1 | Password Strength Meter | A real-time, frontend-only indicator on the signup form: a colored bar (Very Weak → Strong), a live checklist of five acceptance criteria (min length 8, lowercase, uppercase, digit, special character), and a `data-theme`-aware color palette. Advisory only — the backend still accepts any non-empty password. | **Done (v1.0.1)** |
-| 2 | User Profile Page | Authenticated `/profile` page: view your username and email (read-only) and change your password (current-password check + bcrypt). The new password must meet the same five-criteria strength policy as signup (length ≥ 8 plus lower/upper/digit/special), enforced client- and server-side (no meter widget shown). CSRF-protected, rate-limited, no schema change. Dark-mode stays per-browser (`localStorage`). | **Done (v1.0.2)** |
-| 3 | Email Verification on Signup | Registration sends a confirmation email with a single-use, 1-hour `secrets.token_urlsafe(32)` link (stdlib `smtplib`, no new dependency). New accounts are created **unverified** and **cannot log in until the link is clicked** — the login page then offers a CSRF-protected, rate-limited, credential-checked **Resend** button. Google accounts are auto-verified; existing accounts are grandfathered; the signup page degrades to a friendly setup page when SMTP isn't configured. Second DB-schema change (3 columns). | **Done (v1.0.4)** |
-| 4 | Continue with Google (OAuth 2.0) | Sign up / log in with a Google account via the OAuth 2.0 Authorization Code flow (Authlib + OpenID Connect). New users are auto-created and existing emails are linked; login uses the **existing signed session** (no JWT, one cookie). The OAuth `state` param is the flow's CSRF defense. Credentials come from a git-ignored `.env`; with none set, the button shows a friendly setup page and the rest of the app still runs. First DB-schema change (4 nullable columns on `users`). | **Done (v1.0.3)** |
-| 5 | MFA via Authenticator App (TOTP) | Add two-factor authentication using a TOTP authenticator app (e.g., Google Authenticator or Authy) with QR-code enrollment. | Planned |
-| 6 | OTP via Email | Opt-in **Email OTP two-factor authentication**: a user enables it on `/profile`, after which a correct username + password no longer logs them in directly — the app emails a **6-digit one-time code** and login completes only after the code is verified on a dedicated `/login/otp` screen. The challenge runs **after** bcrypt and the email-verified gate; between the two steps a short-lived `pending_2fa_user_id` (not `user_id`) holds the signed session, so the dashboard stays gated. Bounded by a 5-attempt cap, a 5-minute expiry, and a 60-second resend cooldown (all env-tunable), on top of the unchanged per-IP rate limiter. Session-only (no JWT); delivery reuses the stdlib SMTP mailer. Fourth DB-schema change (5 columns on `users`); stdlib only, no new dependency. | **Done (v1.0.6)** |
-| 7 | QR Code Login | Let users log in by scanning a QR code shown on the login page from an already-authenticated mobile device. | Planned |
-| 8 | CAPTCHA on Login | Add a CAPTCHA (e.g., Google reCAPTCHA or hCaptcha) to the login form to block automated and bot-driven login attempts. | Planned |
-| 9 | Account Lockout | Temporarily lock an account after a configured number of consecutive failed login attempts (default 6), with a cooldown timer before retry (default 1 hour, then auto-unlocks). Per-account state on two new `users` columns; the lock is checked **before** bcrypt and shared between `POST /login` and `POST /verify/resend`, so an attacker can't reset the count by switching endpoints. The lock message shows a countdown (a deliberate, bounded relaxation of login enumeration resistance). A per-account layer that **complements — not replaces — the per-IP rate limiter (VULN-7)**, which stays unchanged. Thresholds are env-tunable; stdlib only, no new dependency. Third DB-schema change (2 columns). | **Done (v1.0.5)** |
+Rows are listed in **release order** (by tag); the `#` column is the original
+feature id from the PRD (kept stable so cross-references like "Email OTP (#6)"
+still resolve). Planned items have no tag yet.
+
+| Tag | # | Feature | Description | Status |
+|-----|---|---------|-------------|--------|
+| **v0.1.1** | 0 | Dark Mode Toggle | Light/dark theme toggle on login, signup, and dashboard pages; preference saved in `localStorage`, restored before first paint to avoid FOUC, with `prefers-color-scheme` fallback. | **Done** |
+| **v1.0.1** | 1 | Password Strength Meter | A real-time, frontend-only indicator on the signup form: a colored bar (Very Weak → Strong), a live checklist of five acceptance criteria (min length 8, lowercase, uppercase, digit, special character), and a `data-theme`-aware color palette. Advisory only — the backend still accepts any non-empty password. | **Done** |
+| **v1.0.2** | 2 | User Profile Page | Authenticated `/profile` page: view your username and email (read-only) and change your password (current-password check + bcrypt). The new password must meet the same five-criteria strength policy as signup (length ≥ 8 plus lower/upper/digit/special), enforced client- and server-side (no meter widget shown). CSRF-protected, rate-limited, no schema change. Dark-mode stays per-browser (`localStorage`). | **Done** |
+| **v1.0.3** | 4 | Continue with Google (OAuth 2.0) | Sign up / log in with a Google account via the OAuth 2.0 Authorization Code flow (Authlib + OpenID Connect). New users are auto-created and existing emails are linked; login uses the **existing signed session** (no JWT, one cookie). The OAuth `state` param is the flow's CSRF defense. Credentials come from a git-ignored `.env`; with none set, the button shows a friendly setup page and the rest of the app still runs. First DB-schema change (4 nullable columns on `users`). | **Done** |
+| **v1.0.4** | 3 | Email Verification on Signup | Registration sends a confirmation email with a single-use, 1-hour `secrets.token_urlsafe(32)` link (stdlib `smtplib`, no new dependency). New accounts are created **unverified** and **cannot log in until the link is clicked** — the login page then offers a CSRF-protected, rate-limited, credential-checked **Resend** button. Google accounts are auto-verified; existing accounts are grandfathered; the signup page degrades to a friendly setup page when SMTP isn't configured. Second DB-schema change (3 columns). | **Done** |
+| **v1.0.5** | 9 | Account Lockout | Temporarily lock an account after a configured number of consecutive failed login attempts (default 6), with a cooldown timer before retry (default 1 hour, then auto-unlocks). Per-account state on two new `users` columns; the lock is checked **before** bcrypt and shared between `POST /login` and `POST /verify/resend`, so an attacker can't reset the count by switching endpoints. The lock message shows a countdown (a deliberate, bounded relaxation of login enumeration resistance). A per-account layer that **complements — not replaces — the per-IP rate limiter (VULN-7)**, which stays unchanged. Thresholds are env-tunable; stdlib only, no new dependency. Third DB-schema change (2 columns). | **Done** |
+| **v1.0.6** | 6 | OTP via Email | Opt-in **Email OTP two-factor authentication**: a user enables it on `/profile`, after which a correct username + password no longer logs them in directly — the app emails a **6-digit one-time code** and login completes only after the code is verified on a dedicated `/login/otp` screen. The challenge runs **after** bcrypt and the email-verified gate; between the two steps a short-lived `pending_2fa_user_id` (not `user_id`) holds the signed session, so the dashboard stays gated. Bounded by a 5-attempt cap, a 5-minute expiry, and a 60-second resend cooldown (all env-tunable), on top of the unchanged per-IP rate limiter. Session-only (no JWT); delivery reuses the stdlib SMTP mailer. Fourth DB-schema change (5 columns on `users`); stdlib only, no new dependency. | **Done** |
+| **v1.0.7** | 5 | MFA via Authenticator App (TOTP) | Opt-in **authenticator-app two-factor authentication** (RFC 6238 TOTP): a user enrolls Google Authenticator / Authy / 1Password by scanning a **QR code** on `/profile`, confirms one code to activate, and thereafter a correct password no longer logs them in directly — it asks for the current **6-digit time-based code** on a dedicated `/login/totp` screen. **Independent of Email OTP (#6); when both are on, TOTP takes precedence** and no email is sent (TOTP needs neither SMTP nor Google, so it works on a fresh clone). The TOTP math is pure stdlib; the only new dependency is **`segno`** (pure-Python QR rendering). Session-only (no JWT); a replay guard + ±skew window + the unchanged per-IP rate limiter bound the code. No backup codes this slice (admin clears the flag in the DB). Fifth DB-schema change (3 columns on `users`). | **Done** |
+| _(planned)_ | 7 | QR Code Login | Let users log in by scanning a QR code shown on the login page from an already-authenticated mobile device. | Planned |
+| _(planned)_ | 8 | CAPTCHA on Login | Add a CAPTCHA (e.g., Google reCAPTCHA or hCaptcha) to the login form to block automated and bot-driven login attempts. | Planned |
 
 ---
 

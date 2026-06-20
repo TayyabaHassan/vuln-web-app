@@ -27,6 +27,7 @@ from app.core.security import hash_password, verify_password
 from app.services import verification_service
 from app.services import lockout_service
 from app.services import otp_service
+from app.services import totp_service
 
 
 def password_meets_policy(password: str) -> bool:
@@ -232,7 +233,24 @@ def login(request: Request, username: str, password: str):
                 },
                 status_code=401,
             )
-        # Second factor (Email OTP 2FA, v1.0.6): if the user opted in, do NOT
+        # Second factor #1 -- Authenticator App TOTP (v1.0.7): if the user
+        # enrolled an authenticator app, do NOT create the session yet. Stash the
+        # pending marker (NOT user_id, so /welcome and /profile stay gated) and
+        # send them to the TOTP screen. This runs AFTER bcrypt + the verified gate
+        # (a true second factor) and BEFORE the Email-OTP branch below, so TOTP
+        # takes PRECEDENCE and NO email is sent. The code comes from the user's
+        # authenticator app -- nothing is delivered, so this works even with SMTP
+        # unconfigured. Auth stays session-only (no JWT): the session is promoted
+        # to a full login only after the code is verified at POST /login/totp.
+        if user["totp_enabled"]:
+            request.session["pending_2fa_user_id"] = user["id"]
+            request.session["pending_2fa_username"] = user["username"]
+            request.session["pending_2fa_method"] = "totp"
+            return JSONResponse(
+                content={"otp_required": True, "redirect": "/login/totp"}
+            )
+
+        # Second factor #2 -- Email OTP 2FA (v1.0.6): if the user opted in, do NOT
         # create the session yet. Stash a short-lived pending marker (NOT
         # user_id, so /welcome and /profile stay gated), email a 6-digit code,
         # and tell the page to go to the OTP screen. This runs AFTER bcrypt +
@@ -256,6 +274,9 @@ def login(request: Request, username: str, password: str):
                 )
             request.session["pending_2fa_user_id"] = user["id"]
             request.session["pending_2fa_username"] = user["username"]
+            # Disambiguate which verify screen the login page should open (TOTP vs
+            # email) -- the TOTP branch above sets "totp".
+            request.session["pending_2fa_method"] = "email"
             # background=True: the daemon-thread SMTP send does not block this
             # response; the code is already persisted, so a slow/failed send is
             # recoverable via the OTP screen's resend button.

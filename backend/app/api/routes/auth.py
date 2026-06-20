@@ -41,6 +41,7 @@ from app.services import auth_service
 from app.services import oauth_service
 from app.services import verification_service
 from app.services import otp_service
+from app.services import totp_service
 from app.db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -339,16 +340,19 @@ async def profile_page(request: Request):
     username = request.session.get("username", "")
     email = request.session.get("email", "")
 
-    # Email OTP 2FA (v1.0.6): the session does not carry the 2FA flag, so read it
-    # for the toggle card's initial state (parameterized SELECT -- VULN-1).
+    # 2FA cards (Email OTP v1.0.6 + Authenticator-App TOTP v1.0.7): the session
+    # does not carry either flag, so read both for the cards' initial state
+    # (parameterized SELECT -- VULN-1).
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT two_factor_enabled FROM users WHERE id = ?", [user_id]
+            "SELECT two_factor_enabled, totp_enabled FROM users WHERE id = ?",
+            [user_id],
         ).fetchone()
     finally:
         conn.close()
     twofa_enabled = bool(row["two_factor_enabled"]) if row else False
+    totp_enabled = bool(row["totp_enabled"]) if row else False
 
     with open(os.path.join(TEMPLATE_DIR, "profile.html"), "r") as f:
         page = f.read()
@@ -362,11 +366,12 @@ async def profile_page(request: Request):
     page = page.replace("{{username}}", html.escape(username, quote=True))
     page = page.replace("{{email}}", html.escape(email, quote=True))
 
-    # Server-controlled "0"/"1" flags for the 2FA card (not user input).
+    # Server-controlled "0"/"1" flags for the 2FA cards (not user input).
     page = page.replace("{{twofa_enabled}}", "1" if twofa_enabled else "0")
     page = page.replace(
         "{{email_configured}}", "1" if config.is_email_configured() else "0"
     )
+    page = page.replace("{{totp_enabled}}", "1" if totp_enabled else "0")
 
     return HTMLResponse(content=page)
 
@@ -510,6 +515,162 @@ async def login_otp_resend(request: Request):
     return JSONResponse(
         content={"error": "Could not send the code. Please try again later."},
         status_code=400,
+    )
+
+
+@router.post("/profile/totp/setup")
+async def profile_totp_setup(request: Request):
+    """Begin authenticator-app (TOTP) enrollment for the logged-in user (v1.0.7).
+
+    Session-gated only -- no current-password re-prompt (same deliberate product
+    choice as the Email-OTP toggle; see the spec's NFR-09). Generates a fresh
+    PENDING secret and returns the QR + manual-entry key for the user to scan; the
+    secret is not active until POST /profile/totp/confirm validates a code.
+    Refused when TOTP is already enabled, so an active secret is never overwritten
+    mid-use (the user must disable first to re-enroll). The hidden csrf_token and
+    per-IP rate limit are enforced by middleware before this runs.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    username = request.session.get("username", "")
+    # Re-enroll only after disabling, so an active secret is never overwritten.
+    conn = get_db()
+    try:
+        # FIXED: SQL Injection closed -- parameterized SELECT by primary key.
+        row = conn.execute(
+            "SELECT totp_enabled FROM users WHERE id = ?", [user_id]
+        ).fetchone()
+    finally:
+        conn.close()
+    if row and row["totp_enabled"]:
+        return JSONResponse(
+            content={
+                "error": "Authenticator 2FA is already enabled. Disable it first to re-enroll."
+            },
+            status_code=400,
+        )
+
+    data = totp_service.start_enrollment(user_id, username)
+    if not data:
+        return JSONResponse(
+            content={"error": "Could not start enrollment. Please try again."},
+            status_code=400,
+        )
+    # The secret/QR go ONLY to the authenticated owner (VULN-3): this is the
+    # enrollment payload, not a reflection of attacker input.
+    return JSONResponse(content={"success": True, **data})
+
+
+@router.post("/profile/totp/confirm")
+async def profile_totp_confirm(request: Request, code: str = Form("")):
+    """Confirm enrollment by validating a current code, then activate TOTP (v1.0.7).
+
+    Session-gated. Requiring a valid code proves the authenticator was provisioned
+    correctly (prevents self-lockout from a mis-scanned QR). The raw code is never
+    reflected back (VULN-3). On success totp_enabled flips to 1.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    result = totp_service.confirm(user_id, code)
+    if result["status"] == "ok":
+        return JSONResponse(
+            content={"success": True, "message": "Authenticator app enabled."}
+        )
+    messages = {
+        "invalid": (
+            "That code didn't match. Make sure your authenticator is set up and "
+            "enter the current code."
+        ),
+        "no_pending": "Start setup first, then enter the code from your authenticator app.",
+    }
+    return JSONResponse(
+        content={"error": messages.get(result["status"], messages["invalid"])},
+        status_code=400,
+    )
+
+
+@router.post("/profile/totp/disable")
+async def profile_totp_disable(request: Request):
+    """Disable authenticator-app (TOTP) 2FA for the logged-in user (v1.0.7).
+
+    Session-gated (no password re-prompt; see NFR-09). Clears the secret, the
+    flag, and the replay-guard step. The hidden csrf_token and per-IP rate limit
+    are enforced by middleware before this runs.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    if not totp_service.disable(user_id):
+        return JSONResponse(
+            content={"error": "Could not update the setting."}, status_code=400
+        )
+    return JSONResponse(
+        content={"success": True, "message": "Authenticator app disabled."}
+    )
+
+
+@router.get("/login/totp")
+async def login_totp_page(request: Request):
+    """Render the authenticator-code screen -- only mid-2FA-login via TOTP (v1.0.7).
+
+    Gated on request.session["pending_2fa_user_id"] AND a "totp" method marker,
+    both written by auth_service.login() after a correct password + verified gate
+    when TOTP is enrolled. With no/other pending marker (deep link, after logout,
+    or an email-OTP login) we bounce to /login. The screen reflects NO user input
+    (no secret, no code) -- a fixed prompt only (VULN-3).
+    """
+    if (
+        not request.session.get("pending_2fa_user_id")
+        or request.session.get("pending_2fa_method") != "totp"
+    ):
+        return RedirectResponse(url="/login", status_code=302)
+    page = _load_template("totp_verify.html")
+    # FIXED: CSRF closed -- splice the per-session token into the form's hidden field.
+    token = get_or_create_csrf_token(request)
+    page = page.replace("{{csrf_token}}", html.escape(token, quote=True))
+    return HTMLResponse(content=page)
+
+
+@router.post("/login/totp")
+async def login_totp_post(request: Request, code: str = Form("")):
+    """Verify the authenticator code and complete the login by writing the session.
+
+    Reads the pending user id from the session (set by login()) and the submitted
+    code. On success it clears the pending keys, writes the SAME session keys as a
+    normal login (user_id/username/email) -- this mutation is what makes
+    SessionMiddleware emit the signed Set-Cookie -- and redirects to /welcome.
+    Every other outcome returns a fixed JSON error and no session (the raw code is
+    never echoed -- VULN-3).
+    """
+    user_id = request.session.get("pending_2fa_user_id")
+    if not user_id:
+        return JSONResponse(
+            content={"error": "Your login session expired. Please sign in again."},
+            status_code=401,
+        )
+
+    result = totp_service.verify(user_id, code)
+    if result["status"] == "ok":
+        user = result["user"]
+        request.session.pop("pending_2fa_user_id", None)
+        request.session.pop("pending_2fa_username", None)
+        request.session.pop("pending_2fa_method", None)
+        request.session["user_id"] = user["id"]
+        request.session["username"] = user["username"]
+        request.session["email"] = user["email"]
+        return JSONResponse(content={"success": True, "redirect": "/welcome"})
+
+    messages = {
+        "invalid": "Incorrect code. Open your authenticator app and try again.",
+        "no_challenge": "No active authenticator challenge. Please sign in again.",
+    }
+    return JSONResponse(
+        content={"error": messages.get(result["status"], messages["invalid"])},
+        status_code=401,
     )
 
 
