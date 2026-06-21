@@ -1,7 +1,7 @@
 # Implementation Plan — CAPTCHA on Login (Cloudflare Turnstile)
 
 **Spec:** [captcha-on-login.md](./captcha-on-login.md)
-**Target Release Tag:** v1.0.9
+**Target Release Tag:** v2.0.0
 **Feature #:** 8 (README "Feature Enhancements")
 
 This plan turns the spec into ordered, surgical steps. It adds **one** new file (`core/captcha.py`), edits **two** code files (`core/config.py`, `api/routes/auth.py`), one template (`login.html`), one CSS file, and three doc files. **No** database change, **no** new dependency, and **no** edit to `auth_service.py` / `main.py` / the middleware modules.
@@ -134,7 +134,7 @@ def verify(token: str) -> bool:
 ## Step 5 — `frontend/static/css/styles.css` (small additive block)
 Append:
 ```css
-/* Cloudflare Turnstile widget (v1.0.9) -- additive; spacing only, theme-agnostic. */
+/* Cloudflare Turnstile widget (v2.0.0) -- additive; spacing only, theme-agnostic. */
 .cf-turnstile {
     margin: 16px 0;
 }
@@ -143,7 +143,7 @@ Append:
 ## Step 6 — `.env.example` (Turnstile block)
 Append a block (its own section; the secret key is a real secret like the Google/SMTP blocks):
 ```bash
-# CAPTCHA on Login (Cloudflare Turnstile, v1.0.9) — copy to `.env` and fill in.
+# CAPTCHA on Login (Cloudflare Turnstile, v2.0.0) — copy to `.env` and fill in.
 #
 # Adds a Turnstile widget to the login form; POST /login is verified server-side
 # before any password check. With these UNSET the login page shows no widget and
@@ -162,14 +162,14 @@ TURNSTILE_SECRET_KEY=your-turnstile-secret-key
 ```
 
 ## Step 7 — `README.md`
-- **Releases table:** add a `v1.0.9` row (reference + CAPTCHA on Login).
-- **Feature Enhancements table:** change row #8 status to **Done** and tag **v1.0.9**; update the "X are done … remaining are planned" prose above the table.
+- **Releases table:** add a `v2.0.0` row (reference + CAPTCHA on Login).
+- **Feature Enhancements table:** change row #8 status to **Done** and tag **v2.0.0**; update the "X are done … remaining are planned" prose above the table.
 - Add a **"CAPTCHA on Login — Setup (optional)"** section (sibling to the Google/Email setup sections): Cloudflare steps (create widget → `localhost` hostname → Managed → copy keys → `.env`), plus a one-line production note (real-domain hostname + keys as host env vars; site/secret separation).
 - Explicitly state **no API-endpoints-table change** (no new routes; `POST /login` path/method unchanged).
 - Leave the Intentional-Vulnerabilities / Bug-Fixes tables unchanged (no vuln added/removed).
 
 ## Step 8 — `CLAUDE.md`
-- **Frontend-Backend Integration:** add a **"CAPTCHA on Login (shipped in v1.0.9)"** bullet — Turnstile, always-on `POST /login` when configured, `core/captcha.py` stdlib-`urllib` `siteverify`, `is_captcha_configured()` degrade, **fail-OPEN** on provider error (rationale + bounded risk), `remoteip` omitted, **no schema change**, **no new dependency**, `auth_service.login()` untouched, all 8 vulns intact.
+- **Frontend-Backend Integration:** add a **"CAPTCHA on Login (shipped in v2.0.0)"** bullet — Turnstile, always-on `POST /login` when configured, `core/captcha.py` stdlib-`urllib` `siteverify`, `is_captcha_configured()` degrade, **fail-OPEN** on provider error (rationale + bounded risk), `remoteip` omitted, **no schema change**, **no new dependency**, `auth_service.login()` untouched, all 8 vulns intact.
 - **Important Rules:** add an entry pinning the invariants — verify stays **before** `auth_service.login()`; stdlib `urllib` only / no new dep; keys from env/`.env` only (secret never committed/logged); `.env` git-ignored + `.env.example` placeholder-only; site key `html.escape`-d on splice (VULN-2); token never reflected/logged (VULN-3); degrade-when-unconfigured + fail-open-on-error are deliberate; do **not** modify `main.py`/`db/session.py`/`auth_service.py`/`security.py`/`csrf.py`/`rate_limit.py`/`oauth.py`/`mailer.py`/`qr_login.py`.
 - **Specification Hierarchy:** add item **20. `.claude/specs/captcha-on-login.md` + `-plan.md`**.
 

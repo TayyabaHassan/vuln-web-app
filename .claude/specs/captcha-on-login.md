@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0
 **Last Updated:** 2026-06-21
-**Target Release Tag:** v1.0.9
+**Target Release Tag:** v2.0.0
 **Parent Documents:** [PRD.md](../../docs/PRD.md), [TDD.md](../../docs/TDD.md), [app-foundation.md](./app-foundation.md)
 **Tracking Issue:** [CAPTCHA on Login — README "Feature Enhancements" #8](https://github.com/arifpucit/vuln-web-app/issues)
 
@@ -91,7 +91,7 @@ The implementation touches:
   - **No JS change is required:** the Turnstile script auto-injects a hidden `cf-turnstile-response` input into the enclosing form, so the existing `URLSearchParams(new FormData(form))` submit sends the token automatically; a `400 {"error": ...}` flows through the existing `errorDiv.textContent = data.error` path.
 - **CSS (`styles.css`, modified — small additive block).** Append a minimal `.cf-turnstile { margin: 16px 0; }` (spacing only; theme-agnostic). No existing rule is modified.
 - **`.env.example`.** Append a Turnstile block (its own section, since the secret key is a real secret like the Google/SMTP blocks) with `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` placeholders + the optional `TURNSTILE_HTTP_TIMEOUT`, and a short "where to get these" note (Cloudflare Turnstile dashboard → add `localhost` hostname → copy keys).
-- **Docs.** Update `README.md` (move feature #8 to "Done (v1.0.9)"; add a v1.0.9 release row; add a "CAPTCHA on Login — Setup (optional)" section; note that **no** API endpoints change) and `CLAUDE.md` (integration subsection, Important-Rules entry, Specification-Hierarchy entry).
+- **Docs.** Update `README.md` (move feature #8 to "Done (v2.0.0)"; add a v2.0.0 release row; add a "CAPTCHA on Login — Setup (optional)" section; note that **no** API endpoints change) and `CLAUDE.md` (integration subsection, Important-Rules entry, Specification-Hierarchy entry).
 
 ### 2.2 Out of Scope (Intentionally)
 
@@ -135,7 +135,7 @@ The change MUST touch only the following files (beyond this spec/plan pair and t
 | `frontend/templates/login.html` | Modified | Additive `{{turnstile_head}}` (in `<head>`) + `{{turnstile_widget}}` (in the form); no JS change |
 | `frontend/static/css/styles.css` | Modified | Small additive `.cf-turnstile` spacing block |
 | `.env.example` | Modified | Turnstile key placeholders + optional timeout + "where to get these" note |
-| `README.md` | Modified | Feature #8 → Done (v1.0.9); release row; "CAPTCHA on Login — Setup" section; note no API change |
+| `README.md` | Modified | Feature #8 → Done (v2.0.0); release row; "CAPTCHA on Login — Setup" section; note no API change |
 | `CLAUDE.md` | Modified | Integration subsection, Important-Rules entry, hierarchy entry |
 
 Files that MUST NOT be modified by this change:
@@ -273,7 +273,7 @@ Outbound HTTP in `core/` (like `oauth.py`/`mailer.py`); env config via `core/con
 - **AC-10:** `git diff` is empty for `main.py`, `db/session.py`, `core/security.py`, `core/csrf.py`, `core/rate_limit.py`, `core/oauth.py`, `core/mailer.py`, `core/qr_login.py`, every service, every template except `login.html`.
 - **AC-11:** `uv run backend/app/main.py` boots with no traceback; a normal correct-password login still succeeds.
 - **AC-12:** VULN-1…VULN-8 all remain closed (no new SQL; bcrypt intact and reached only after the CAPTCHA; rate-limit + CSRF + session middleware unchanged; no `/download/db`; env-sourced keys; no token reflection; escaped site-key splice).
-- **AC-13:** `README.md` shows feature #8 as "Done (v1.0.9)", adds a v1.0.9 release row and a "CAPTCHA on Login — Setup" section, and notes no API-endpoint change. `CLAUDE.md` has the new subsection, rule, and hierarchy entry.
+- **AC-13:** `README.md` shows feature #8 as "Done (v2.0.0)", adds a v2.0.0 release row and a "CAPTCHA on Login — Setup" section, and notes no API-endpoint change. `CLAUDE.md` has the new subsection, rule, and hierarchy entry.
 
 ---
 
@@ -294,7 +294,7 @@ Outbound HTTP in `core/` (like `oauth.py`/`mailer.py`); env config via `core/con
 | TC-11 | No new dep | Repo checkout | `pyproject`/`uv.lock` diff empty; `captcha.py` imports stdlib + config only |
 | TC-12 | Untouched files | Repo checkout | `git diff --stat` empty for the forbidden list |
 | TC-13 | App boots + normal login | Repo checkout | `uv run …` no traceback; correct pw → `200` |
-| TC-14 | Docs updated | Repo checkout | feature #8 "Done (v1.0.9)"; v1.0.9 row; Setup section; no-API-change note; CLAUDE entries |
+| TC-14 | Docs updated | Repo checkout | feature #8 "Done (v2.0.0)"; v2.0.0 row; Setup section; no-API-change note; CLAUDE entries |
 
 ---
 

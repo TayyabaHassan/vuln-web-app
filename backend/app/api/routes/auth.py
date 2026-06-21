@@ -37,6 +37,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from app.core.csrf import get_or_create_csrf_token
 from app.core import config
 from app.core import qr_login
+from app.core import captcha
 from app.core.oauth import oauth
 from app.services import auth_service
 from app.services import oauth_service
@@ -218,6 +219,24 @@ async def login_page(request: Request):
     # FIXED: CSRF closed -- splice the per-session token into the form's hidden field.
     token = get_or_create_csrf_token(request)
     page = page.replace("{{csrf_token}}", html.escape(token, quote=True))
+    # CAPTCHA on Login (v2.0.0): render the Cloudflare Turnstile widget + script
+    # only when both keys are configured; otherwise both placeholders collapse to
+    # "" and the login page is byte-for-byte the pre-CAPTCHA page (graceful degrade).
+    if config.is_captcha_configured():
+        head = (
+            '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"'
+            " async defer></script>"
+        )
+        widget = (
+            '<div class="cf-turnstile" data-sitekey="'
+            + html.escape(config.TURNSTILE_SITE_KEY, quote=True)
+            + '"></div>'
+        )
+    else:
+        head = widget = ""
+    page = page.replace("{{turnstile_head}}", head).replace(
+        "{{turnstile_widget}}", widget
+    )
     return HTMLResponse(content=page)
 
 
@@ -226,14 +245,28 @@ async def login_post(
     request: Request,
     username: str = Form(""),
     password: str = Form(""),
+    cf_turnstile_response: str = Form("", alias="cf-turnstile-response"),
 ):
     """Handle login form submission.
+
+    CAPTCHA on Login (v2.0.0): when Turnstile is configured, the token is
+    verified BEFORE auth_service.login() -- a request that fails the CAPTCHA
+    never reaches the lockout gate, bcrypt, or the DB, and writes no session.
+    A failed check returns 400 with a fixed message (the raw token is never
+    reflected or logged -- VULN-3). When Turnstile is unconfigured the check is
+    skipped entirely (graceful degrade). The Form alias is required because the
+    Turnstile field name (`cf-turnstile-response`) contains hyphens.
 
     The Request parameter is forwarded to the service layer so it can
     write user_id/username/email into `request.session` on success --
     that mutation is what triggers SessionMiddleware to write the
     Set-Cookie header on the response.
     """
+    if config.is_captcha_configured() and not captcha.verify(cf_turnstile_response):
+        return JSONResponse(
+            {"error": "CAPTCHA verification failed. Please try again."},
+            status_code=400,
+        )
     return auth_service.login(request, username, password)
 
 
