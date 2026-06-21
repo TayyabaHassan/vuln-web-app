@@ -73,8 +73,9 @@ This repository ships in several tagged releases. The versions below are the mai
 | **v1.0.6** | Students who want the reference **plus email OTP 2FA** | Everything in v1.0.5 plus **Email OTP Two-Factor Authentication**: a user can opt in from their profile, after which a correct password no longer logs them in directly — the app emails a **6-digit one-time code** (5-min expiry, 5-attempt cap, 60-s resend cooldown — all env-tunable) and completes login only after the code is verified on a dedicated screen. The challenge runs *after* bcrypt + the email-verified gate; the session is promoted only post-OTP (**session-only, no JWT**). Fourth DB-schema change (5 columns on `users`); stdlib only, no new dependency. |
 | **v1.0.7** | Students who want the reference **plus authenticator-app 2FA** | Everything in v1.0.6 plus **MFA via Authenticator App (TOTP)**: a user enrolls Google Authenticator / Authy by scanning a **QR code** on their profile and confirming one code; thereafter a correct password issues a **TOTP challenge** on a dedicated `/login/totp` screen instead of completing login. **Independent of Email OTP and takes precedence** when both are on (no email sent); it needs **no SMTP and no Google**, so it works on a fresh clone. TOTP math is pure stdlib; the **only new dependency is `segno`** (pure-Python QR). Session-only (no JWT); replay-guarded. Fifth DB-schema change (3 columns on `users`). |
 | **v1.0.8** | Students who want the reference **plus QR-code login** | Everything in v1.0.7 plus **QR Code Login**: an unauthenticated browser is shown a **QR code** on the login page and an already-signed-in device scans it, confirms on an **Approve / Reject** page, and logs the first browser in — the WhatsApp-Web pattern. The desktop **polls** for approval; pairing state is held in an **in-memory store** (like the rate limiter), so there is **no database-schema change** and **no new dependency** (the QR image reuses `segno`). Tokens are single-use and short-lived, and an **owner-binding** check (only the browser that generated a QR can be logged in by it) closes the login-CSRF vector. Login stays **session-only (no JWT)**; the trust comes from the already-authenticated device (its second factor was already satisfied). |
+| **v2.0.0** | Students who want the reference **plus CAPTCHA on login** | Everything in v1.0.8 plus **CAPTCHA on Login** (**Cloudflare Turnstile**): the login form shows a Turnstile widget and **`POST /login` is verified server-side before any password check**, blocking automated/bot login attempts. Verification is a stdlib-`urllib` call to Cloudflare's `siteverify` — **no new dependency** and **no database-schema change**. With no keys set the widget isn't shown and login works exactly as today (graceful degrade, like the Google/SMTP setup pages); a configured-but-unreachable Cloudflare **fails open** so an outage can't lock everyone out. Keys come from a git-ignored `.env`; the check runs **before** the account-lockout/bcrypt logic, which is otherwise unchanged. |
 
-The incremental tags between them (**v0.1.2 – v0.1.7**) each close one additional vulnerability — see the [Bug Fixes](#bug-fixes) table for the version-by-version mapping. The feature-enhancement tags build on top of v1.0.0: **v1.0.1** adds the password strength meter, **v1.0.2** the User Profile Page, **v1.0.3** Continue with Google, **v1.0.4** Email Verification on Signup, **v1.0.5** Account Lockout, **v1.0.6** Email OTP 2FA, **v1.0.7** MFA via Authenticator App (TOTP), and **v1.0.8** QR Code Login.
+The incremental tags between them (**v0.1.2 – v0.1.7**) each close one additional vulnerability — see the [Bug Fixes](#bug-fixes) table for the version-by-version mapping. The feature-enhancement tags build on top of v1.0.0: **v1.0.1** adds the password strength meter, **v1.0.2** the User Profile Page, **v1.0.3** Continue with Google, **v1.0.4** Email Verification on Signup, **v1.0.5** Account Lockout, **v1.0.6** Email OTP 2FA, **v1.0.7** MFA via Authenticator App (TOTP), **v1.0.8** QR Code Login, and **v2.0.0** CAPTCHA on Login.
 
 ### Download the version you want
 
@@ -198,6 +199,48 @@ build the link. The real `.env` is **git-ignored** — never commit your secret;
 `.env.example` holds placeholders only.
 
 ---
+
+## CAPTCHA on Login — Setup (optional)
+
+As of **v2.0.0**, the login form can show a **Cloudflare Turnstile** CAPTCHA, and
+`POST /login` is verified server-side **before** any password check — blocking
+automated/bot login attempts. The app runs fine **without** any setup: with no
+keys configured the widget isn't shown and login behaves exactly as before
+(graceful degrade, like the Google / Email setup pages). Verification uses
+Python's standard-library `urllib` — **no extra dependency** — and there is **no
+database change**.
+
+To enable it, give the app a Turnstile widget (free, no domain required):
+
+1. **Create a Cloudflare account** — https://dash.cloudflare.com/sign-up (free,
+   no credit card, no domain needed).
+2. **Add a Turnstile widget** — dashboard → **Turnstile** → **Add widget**.
+   - **Hostname:** `localhost` (add `127.0.0.1` too if you like).
+   - **Widget mode:** **Managed** (recommended).
+3. **Copy the keys** — Cloudflare shows a **Site Key** (public) and a **Secret
+   Key** (private).
+4. **Add the credentials locally** — copy the template and fill in your values:
+   ```bash
+   cp .env.example .env
+   # then edit .env:
+   #   TURNSTILE_SITE_KEY=...
+   #   TURNSTILE_SECRET_KEY=...
+   ```
+5. **Restart** — `uv run backend/app/main.py`. The login page now shows the
+   widget and rejects logins that fail the CAPTCHA.
+
+**Production note:** use a **separate** widget whose hostname is your real domain
+(serve the app over HTTPS), and provide the keys through your host's environment
+variables / secrets rather than a committed `.env`. Both keys are required
+together; the **Site Key is public** but the **Secret Key is a real secret** —
+the real `.env` is **git-ignored**, and `.env.example` holds placeholders only. A
+configured-but-unreachable Cloudflare **fails open** (login still proceeds, gated
+by password + lockout + rate-limit) so an outage can't lock everyone out.
+
+*(This feature adds no new API endpoints — `POST /login` is unchanged in path and
+method; only its request now carries the Turnstile token.)*
+
+---
 ## API Endpoints
 
 | Method | Endpoint | Description | Auth Required |
@@ -301,7 +344,7 @@ The **weak password storage** bug (VULN-5: MD5 → bcrypt) is **fixed** as of **
 
 ## Feature Enhancements
 
-The dark mode toggle (v0.1.1), password strength meter (v1.0.1), User Profile Page (v1.0.2), Continue with Google (v1.0.3), Email Verification on Signup (v1.0.4), Account Lockout (v1.0.5), Email OTP 2FA (v1.0.6), MFA via Authenticator App / TOTP (v1.0.7), and QR Code Login (v1.0.8) are **done** — see the Status column. The remaining items are **planned**.
+The dark mode toggle (v0.1.1), password strength meter (v1.0.1), User Profile Page (v1.0.2), Continue with Google (v1.0.3), Email Verification on Signup (v1.0.4), Account Lockout (v1.0.5), Email OTP 2FA (v1.0.6), MFA via Authenticator App / TOTP (v1.0.7), QR Code Login (v1.0.8), and CAPTCHA on Login (v2.0.0) are **done** — see the Status column. **All planned feature enhancements are now complete.**
 
 Rows are listed in **release order** (by tag); the `#` column is the original
 feature id from the PRD (kept stable so cross-references like "Email OTP (#6)"
@@ -318,7 +361,7 @@ still resolve). Planned items have no tag yet.
 | **v1.0.6** | 6 | OTP via Email | Opt-in **Email OTP two-factor authentication**: a user enables it on `/profile`, after which a correct username + password no longer logs them in directly — the app emails a **6-digit one-time code** and login completes only after the code is verified on a dedicated `/login/otp` screen. The challenge runs **after** bcrypt and the email-verified gate; between the two steps a short-lived `pending_2fa_user_id` (not `user_id`) holds the signed session, so the dashboard stays gated. Bounded by a 5-attempt cap, a 5-minute expiry, and a 60-second resend cooldown (all env-tunable), on top of the unchanged per-IP rate limiter. Session-only (no JWT); delivery reuses the stdlib SMTP mailer. Fourth DB-schema change (5 columns on `users`); stdlib only, no new dependency. | **Done** |
 | **v1.0.7** | 5 | MFA via Authenticator App (TOTP) | Opt-in **authenticator-app two-factor authentication** (RFC 6238 TOTP): a user enrolls Google Authenticator / Authy / 1Password by scanning a **QR code** on `/profile`, confirms one code to activate, and thereafter a correct password no longer logs them in directly — it asks for the current **6-digit time-based code** on a dedicated `/login/totp` screen. **Independent of Email OTP (#6); when both are on, TOTP takes precedence** and no email is sent (TOTP needs neither SMTP nor Google, so it works on a fresh clone). The TOTP math is pure stdlib; the only new dependency is **`segno`** (pure-Python QR rendering). Session-only (no JWT); a replay guard + ±skew window + the unchanged per-IP rate limiter bound the code. No backup codes this slice (admin clears the flag in the DB). Fifth DB-schema change (3 columns on `users`). |
 | **v1.0.8** | 7 | QR Code Login | Log in by scanning a **QR code** shown on the login page from an already-authenticated device, which confirms on an **Approve / Reject** page — the WhatsApp-Web pattern. The unauthenticated browser **polls** for approval; pairing state lives in an **in-memory store** (`core/qr_login.py`, like the rate limiter), so there is **no database-schema change** and **no new dependency** (the QR image reuses `segno`). Tokens are `secrets.token_urlsafe(32)`, **single-use**, and short-lived; an **owner-binding** check (only the browser that generated a QR can be logged in by it) closes the login-CSRF / session-fixation vector. Approve/Reject are **session-gated POSTs** behind the existing CSRF + rate-limit middleware. Login stays **session-only (no JWT)**; the desktop is not re-challenged for 2FA because the approving device already satisfied it. `auth_service.py`, `main.py`, and the DB schema are unchanged. | **Done** |
-| _(planned)_ | 8 | CAPTCHA on Login | Add a CAPTCHA (e.g., Google reCAPTCHA or hCaptcha) to the login form to block automated and bot-driven login attempts. | Planned |
+| **v2.0.0** | 8 | CAPTCHA on Login | Add a **Cloudflare Turnstile** CAPTCHA to the login form to block automated and bot-driven login attempts. The widget is shown on `/login` and **`POST /login` is verified server-side (stdlib `urllib` → Cloudflare `siteverify`) before any password check** — a failed CAPTCHA never reaches the account-lockout/bcrypt logic. **No new dependency, no database-schema change.** Keys come from a git-ignored `.env`; with none set the widget isn't rendered and login works exactly as today (graceful degrade). A configured-but-unreachable Cloudflare **fails open** (a bot filter must not lock out everyone during an outage). Always-on for the login form only; `auth_service.login()` and all middleware are unchanged. | **Done** |
 
 ---
 

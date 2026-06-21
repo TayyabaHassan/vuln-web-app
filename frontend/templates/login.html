@@ -25,6 +25,9 @@
     </script>
     <title>Login - Security Vulnerability Lab</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <!-- CAPTCHA on Login (v2.0.0): the Cloudflare Turnstile loader script, spliced
+         in by GET /login only when Turnstile is configured (else this is empty). -->
+    {{turnstile_head}}
 </head>
 <body>
     <!-- Shared Header -->
@@ -86,6 +89,12 @@
                         <label class="form-label" for="password">Password</label>
                         <input type="password" id="password" name="password" class="form-input" placeholder="Enter your password" required>
                     </div>
+                    <!-- CAPTCHA on Login (v2.0.0): the Turnstile widget, spliced in by
+                         GET /login only when configured (else empty). The widget auto-
+                         injects a hidden `cf-turnstile-response` field into this form, so
+                         the existing URLSearchParams(FormData) submit sends the token with
+                         no JS change; POST /login verifies it before the password check. -->
+                    {{turnstile_widget}}
                     <button type="submit" class="btn btn-primary">Sign In</button>
                 </form>
 

@@ -1,6 +1,6 @@
 """Configuration + .env loading for the Continue-with-Google, Email
-Verification, Account-Lockout, Email-OTP-2FA, Authenticator-App-TOTP-2FA, and
-QR-Code-Login features.
+Verification, Account-Lockout, Email-OTP-2FA, Authenticator-App-TOTP-2FA,
+QR-Code-Login, and CAPTCHA-on-Login features.
 
 Stdlib only -- no python-dotenv dependency. This module:
 
@@ -179,3 +179,30 @@ QR_LOGIN_TTL_SECONDS = int(os.environ.get("QR_LOGIN_TTL_SECONDS", "120"))
 QR_LOGIN_POLL_INTERVAL_SECONDS = int(
     os.environ.get("QR_LOGIN_POLL_INTERVAL_SECONDS", "2")
 )
+
+
+# --- Cloudflare Turnstile CAPTCHA settings (site key public; secret key IS a secret) ---
+# An always-on CAPTCHA on POST /login: the login page shows a Turnstile widget and
+# the POST is verified server-side (core/captcha.py, stdlib urllib -- no new
+# dependency) BEFORE any password check. With BOTH keys unset the login page renders
+# no widget and the POST performs no check, so login works exactly as today (graceful
+# degrade, mirroring the Google/SMTP blocks above). The SITE key is public; the SECRET
+# key is a real secret -- env/.env only, never committed, never logged. A configured-
+# but-unreachable verify endpoint FAILS OPEN (allows login + logs a warning) -- a bot
+# filter must not lock out every legitimate user during a provider outage (same posture
+# as the rate limiter / account lockout; the opposite of CSRFMiddleware's fail-closed).
+TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
+TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
+
+# Network timeout (seconds) for the siteverify call, so a slow/hung Cloudflare
+# endpoint cannot pin a worker indefinitely (mirrors OAUTH_HTTP_TIMEOUT/SMTP_TIMEOUT).
+TURNSTILE_HTTP_TIMEOUT = float(os.environ.get("TURNSTILE_HTTP_TIMEOUT", "10"))
+
+
+def is_captcha_configured() -> bool:
+    """Return True only when both the site and secret keys are present.
+
+    The login route uses this to decide whether to render + enforce the Turnstile
+    widget or skip it entirely. Mirrors is_google_configured() / is_email_configured().
+    """
+    return bool(TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY)
