@@ -36,6 +36,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 from app.core.csrf import get_or_create_csrf_token
 from app.core import config
+from app.core import qr_login
 from app.core.oauth import oauth
 from app.services import auth_service
 from app.services import oauth_service
@@ -760,6 +761,140 @@ async def google_callback(request: Request):
     request.session["email"] = user["email"]
 
     return RedirectResponse(url="/welcome", status_code=302)
+
+
+@router.get("/qr/create")
+async def qr_create(request: Request):
+    """Vend a fresh QR-login token, bound to THIS browser's session (v1.0.8).
+
+    Worker endpoint (returns JSON, no page): mint a token, render the QR for
+    ``{APP_BASE_URL}/qr/scan/{token}``, and return both to the login page, which
+    shows the QR and polls ``GET /qr/status``.
+
+    GET on purpose: it vends an UNAUTHENTICATED capability that is useless until an
+    already-authenticated device approves it -- there is nothing CSRF-sensitive to
+    protect (mirrors the OAuth GET login). The crucial step is recording the token
+    in ``request.session["qr_login_token"]``: this **owner-binding** is what later
+    lets ONLY this browser be logged in by the token (see ``qr_status`` -- it closes
+    the login-CSRF / session-fixation vector).
+    """
+    token = qr_login.create_token()
+    request.session["qr_login_token"] = token
+    qr_url = f"{config.APP_BASE_URL}/qr/scan/{token}"
+    return JSONResponse(
+        content={
+            "token": token,
+            "qr_url": qr_url,
+            "qr_data_uri": qr_login.render_qr(qr_url),
+            "poll_interval": config.QR_LOGIN_POLL_INTERVAL_SECONDS,
+            "expires_in": config.QR_LOGIN_TTL_SECONDS,
+        }
+    )
+
+
+@router.get("/qr/status")
+async def qr_status(request: Request, token: str = ""):
+    """Desktop poll. Owner-bound: only the browser that created ``token`` is promoted.
+
+    Returns ``{"status": ...}`` where status is ``pending`` / ``rejected`` /
+    ``expired`` / ``invalid``, or ``approved`` plus a ``redirect``. On ``approved``
+    it claims the (single-use) token and writes the SAME session keys as
+    ``auth_service.login()`` (``user_id`` / ``username`` / ``email``) -- this
+    mutation is what makes SessionMiddleware emit the signed Set-Cookie, completing
+    the login on this device with no password/2FA entered here.
+
+    This is a GET that promotes the session -- justified exactly like the OAuth /
+    verify GET callbacks, and ADDITIONALLY gated two ways: the unguessable token,
+    and **owner-binding** (the polling browser's signed session must already own
+    this token). A cross-site ``GET /qr/status`` forced into a victim's browser
+    carries no matching ``qr_login_token`` and is ignored -- closing login-CSRF.
+    """
+    if not token or request.session.get("qr_login_token") != token:
+        return JSONResponse(content={"status": "invalid"})
+
+    st = qr_login.status(token)
+    if st == "approved":
+        identity = qr_login.claim(token)
+        if not identity:
+            return JSONResponse(content={"status": "expired"})
+        request.session.pop("qr_login_token", None)
+        request.session["user_id"] = identity["user_id"]
+        request.session["username"] = identity["username"]
+        request.session["email"] = identity["email"]
+        return JSONResponse(content={"status": "approved", "redirect": "/welcome"})
+    return JSONResponse(content={"status": st})
+
+
+@router.get("/qr/scan/{token}")
+async def qr_scan(request: Request, token: str):
+    """Phone landing page the QR encodes (v1.0.8).
+
+    **Session-gated:** you must be logged in to approve a new device. With no
+    session we 302 to ``/login`` (the phone logs in, then re-scans). Logged in, we
+    render ``qr_approve.html`` with the HTML-escaped approver ``{{username}}``, the
+    ``{{token}}``, and a CSRF token. An unknown / expired / already-acted-on token
+    renders a fixed "no longer valid" state (buttons hidden) -- the raw token is
+    never reflected as markup (VULN-3 posture; the token is escaped on splice).
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    username = request.session.get("username", "")
+    entry = qr_login.get(token)
+    valid = bool(entry and entry["status"] == "pending")
+
+    page = _load_template("qr_approve.html")
+    # FIXED: CSRF closed -- splice the per-session token into the form's hidden field.
+    csrf = get_or_create_csrf_token(request)
+    page = page.replace("{{csrf_token}}", html.escape(csrf, quote=True))
+    # FIXED: Stored/Reflected XSS closed -- escape every value before splicing.
+    page = page.replace("{{token}}", html.escape(token, quote=True))
+    page = page.replace("{{username}}", html.escape(username, quote=True))
+    # Server-controlled "0"/"1" flag (not user input).
+    page = page.replace("{{valid}}", "1" if valid else "0")
+    return HTMLResponse(content=page)
+
+
+@router.post("/qr/approve")
+async def qr_approve_post(request: Request, token: str = Form("")):
+    """Approve a pending QR-login as the logged-in user (v1.0.8).
+
+    Session-gated (no password re-prompt; see the spec's NFR-09). The approver's
+    identity is read from THIS device's signed session -- the desktop inherits it
+    on its next poll. The hidden csrf_token and per-IP rate limit are enforced by
+    middleware before this runs.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    ok = qr_login.approve(
+        token,
+        user_id,
+        request.session.get("username", ""),
+        request.session.get("email", ""),
+    )
+    if ok:
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": "Login approved. Return to the other device.",
+            }
+        )
+    return JSONResponse(
+        content={"error": "This QR code has expired or was already used."},
+        status_code=400,
+    )
+
+
+@router.post("/qr/reject")
+async def qr_reject_post(request: Request, token: str = Form("")):
+    """Reject a pending QR-login (v1.0.8). Session-gated; CSRF + rate-limit apply."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    qr_login.reject(token)
+    return JSONResponse(content={"success": True, "message": "Login request denied."})
 
 
 @router.get("/logout")

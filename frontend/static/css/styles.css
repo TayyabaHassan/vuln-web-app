@@ -958,3 +958,16 @@ a:hover {
 .notice-card .btn-primary {
     margin-top: 8px;
 }
+
+/* QR Code Login panel (v1.0.8) -- additive; reuses theme variables so it themes
+   in light/dark automatically. The QR image is a server-rendered PNG data: URI. */
+.qr-panel {
+    margin-top: 24px;
+    text-align: center;
+}
+
+.qr-panel #qr-image {
+    max-width: 200px;
+    margin: 12px auto;
+    display: block;
+}

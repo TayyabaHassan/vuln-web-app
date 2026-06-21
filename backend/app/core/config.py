@@ -1,6 +1,6 @@
 """Configuration + .env loading for the Continue-with-Google, Email
-Verification, Account-Lockout, Email-OTP-2FA, and Authenticator-App-TOTP-2FA
-features.
+Verification, Account-Lockout, Email-OTP-2FA, Authenticator-App-TOTP-2FA, and
+QR-Code-Login features.
 
 Stdlib only -- no python-dotenv dependency. This module:
 
@@ -163,3 +163,19 @@ TOTP_PERIOD_SECONDS = int(os.environ.get("TOTP_PERIOD_SECONDS", "30"))
 TOTP_SKEW_STEPS = int(os.environ.get("TOTP_SKEW_STEPS", "1"))
 TOTP_DIGITS = 6        # fixed: authenticator-app default (not env-tunable).
 TOTP_SECRET_BYTES = 20  # fixed: 160-bit secret (RFC 6238 norm), base32 in the QR.
+
+
+# --- QR Code Login settings (env-tunable, non-secret) ------------------------
+# An unauthenticated browser is shown a QR on /login; an already-authenticated
+# device scans it and approves, logging the first browser in (the WhatsApp-Web
+# pattern). State is in-memory (core/qr_login.py) and the signed session -- there
+# is NO DB schema change and NO new dependency (the QR image reuses `segno`, added
+# for TOTP in v1.0.7). These are NOT secrets and have NO is_*_configured() gate --
+# QR login needs neither SMTP nor Google. The scannable URL is built from the
+# existing APP_BASE_URL above: for a real cross-device scan set APP_BASE_URL to an
+# address the scanning device can reach (LAN IP / public origin); on localhost
+# "scan" by opening the URL in a second, already-logged-in browser.
+QR_LOGIN_TTL_SECONDS = int(os.environ.get("QR_LOGIN_TTL_SECONDS", "120"))
+QR_LOGIN_POLL_INTERVAL_SECONDS = int(
+    os.environ.get("QR_LOGIN_POLL_INTERVAL_SECONDS", "2")
+)
