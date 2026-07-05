@@ -977,3 +977,26 @@ a:hover {
 .cf-turnstile {
     margin: 16px 0;
 }
+
+/* ============================================================
+ * Email Change with Verification (profile card). The card
+ * reuses the existing .profile-card surface/border/colors so
+ * light/dark theming comes for free. The .email-change-status
+ * line is a soft callout built from the existing
+ * --color-error-* palette via color-mix (no new color literal).
+ * ============================================================ */
+.email-change-card {
+    /* No new colors. The base .profile-card already supplies
+       --color-bg-surface / --color-border-soft / --color-text-primary. */
+}
+
+.email-change-status {
+    margin: 0 0 16px 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-error-bg) 60%, transparent);
+    color: var(--color-text-primary);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    border: 1px solid color-mix(in srgb, var(--color-error-border) 70%, transparent);
+}

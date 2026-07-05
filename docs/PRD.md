@@ -113,6 +113,13 @@ Out of scope:
 - Results must be displayed as an HTML response
 - Search must match against both username and email fields
 
+#### FR-6: User Email Change (Email Change with Verification)
+- Authenticated users must be able to request a change of their email address from the profile page
+- The change must require the current password and a confirmation of the new email
+- The new email must be verified via a single-use confirmation link emailed to the new address
+- The current email must remain in effect until the verification link is opened
+- The token must be time-bounded (default 1 hour, env-tunable) and single-use
+
 ### 3.2 Intentional Vulnerabilities
 
 #### VULN-1: SQL Injection (Priority: CRITICAL)

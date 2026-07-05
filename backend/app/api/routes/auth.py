@@ -44,6 +44,7 @@ from app.services import oauth_service
 from app.services import verification_service
 from app.services import otp_service
 from app.services import totp_service
+from app.services import email_change_service
 from app.db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -407,7 +408,194 @@ async def profile_page(request: Request):
     )
     page = page.replace("{{totp_enabled}}", "1" if totp_enabled else "0")
 
+    # Email Change with Verification: read the pending-email triple so the
+    # profile page can show the "change to <pending_email> is pending
+    # verification" status line and either render the form or, when email is
+    # unconfigured, link to the degrade page. Parameterized SELECT -- VULN-1.
+    pending_email = ""
+    conn = get_db()
+    try:
+        prow = conn.execute(
+            "SELECT pending_email FROM users WHERE id = ?", [user_id]
+        ).fetchone()
+    finally:
+        conn.close()
+    if prow and prow["pending_email"]:
+        pending_email = prow["pending_email"]
+
+    # Email Change card: either the form (when email is configured) or the
+    # "email not configured" inline notice linking to the degrade page. The
+    # hidden csrf_token is html.escape(..., quote=True)'d before splicing
+    # (same pattern as the change-password card). The form fields use ids
+    # unique to this card so the JS submit handler can target #email-change-form.
+    if config.is_email_configured():
+        email_change_card = (
+            '<form id="email-change-form">'
+            f'<input type="hidden" name="csrf_token" value="{html.escape(token, quote=True)}">'
+            '<div class="form-group">'
+            '<label class="form-label" for="current_password_email">Current Password</label>'
+            '<input type="password" id="current_password_email" name="current_password" '
+            'class="form-input" placeholder="Enter your current password" required>'
+            '</div>'
+            '<div class="form-group">'
+            '<label class="form-label" for="new_email">New Email</label>'
+            '<input type="email" id="new_email" name="new_email" class="form-input" '
+            'placeholder="Enter your new email" required>'
+            '</div>'
+            '<div class="form-group">'
+            '<label class="form-label" for="confirm_new_email">Confirm New Email</label>'
+            '<input type="email" id="confirm_new_email" name="confirm_new_email" '
+            'class="form-input" placeholder="Re-enter the new email" required>'
+            '</div>'
+            '<button type="submit" class="btn btn-primary">Send verification email</button>'
+            '</form>'
+        )
+    else:
+        email_change_card = (
+            '<p class="form-subtitle">'
+            'Changing your email requires email delivery, which is not configured '
+            'on this server. See '
+            '<a href="/email-not-configured-for-change">/email-not-configured-for-change</a>'
+            ' for details.'
+            '</p>'
+        )
+
+    # Pending-state status line -- empty when no change is pending, otherwise
+    # "A change to {pending_email} is pending verification." with the address
+    # escaped (VULN-2). Spec §4.6 / AC-12.
+    if pending_email:
+        email_change_status = (
+            f'<p class="email-change-status">A change to {html.escape(pending_email, quote=True)} '
+            'is pending verification. Check the inbox of that address for the confirmation link.</p>'
+        )
+    else:
+        email_change_status = ""
+
+    page = page.replace("{{email_change_card}}", email_change_card)
+    page = page.replace("{{email_change_status}}", email_change_status)
+
     return HTMLResponse(content=page)
+
+
+def _render_verify_email_change_result(status: str) -> HTMLResponse:
+    """Render the fixed-outcome page for /verify-email-change.
+
+    Three status values, three fixed title/message pairs. The raw token is
+    never on the page; the {{title}} / {{message}} placeholders carry only
+    author-controlled strings, and even those are html.escape(..., quote=True)'d
+    before splicing (VULN-2 posture, matching the existing verify_email
+    handler's discipline).
+    """
+    outcomes = {
+        "ok": (
+            "Email updated",
+            "Your email has been updated. You can now close this tab and "
+            "return to your profile.",
+        ),
+        "expired": (
+            "Link expired",
+            "This email-change link has expired. You can request a new one "
+            "from your profile page.",
+        ),
+        "invalid": (
+            "Invalid link",
+            "This email-change link is invalid or has already been used.",
+        ),
+    }
+    title, message = outcomes.get(status, outcomes["invalid"])
+    page = _load_template("verify_email_change_result.html")
+    page = page.replace("{{title}}", html.escape(title, quote=True))
+    page = page.replace("{{message}}", html.escape(message, quote=True))
+    return HTMLResponse(content=page)
+
+
+@router.post("/profile/email/request")
+async def profile_email_request_post(
+    request: Request,
+    current_password: str = Form(""),
+    new_email: str = Form(""),
+    confirm_new_email: str = Form(""),
+    csrf_token: str = Form("", alias="csrf_token"),
+):
+    """Handle an email-change request from the authenticated profile page.
+
+    Session-gated: the request must carry a valid session cookie; on miss
+    we return 401 {"error": "Not authenticated"} (defense in depth; the
+    CSRF middleware in v1.0.4+ already blocks session-less POSTs at 403).
+
+    CSRF-forward-compatible: the form MUST include a `csrf_token` hidden
+    field. In v0.1.0 (no CSRF middleware) the value is read but not
+    validated against the session. A missing or empty field is a client
+    error (400) so the handler is unchanged when a future CSRFMiddleware
+    is added -- FR-11.
+
+    Email-not-configured gate: when is_email_configured() is false, the
+    POST returns 200 with email_not_configured_for_change.html and writes
+    no state -- FR-10, mirrors the existing signup gate.
+
+    Every other validation (non-empty, match, regex, current-password gate,
+    uniqueness, persistence, email send, rollback on send failure) lives in
+    services/email_change_service.start_email_change() -- this handler is a
+    thin shim that:
+      1. gates on email being configured,
+      2. gates on the session,
+      3. reads the four form fields,
+      4. forwards to the service,
+      5. returns the service's JSONResponse verbatim (the profile page's
+         fetch() handler renders it in the #email-change-message div).
+    """
+    # FR-10: graceful-degrade gate. Mirrors the existing signup_post() gate
+    # at the top of this module.
+    if not config.is_email_configured():
+        return HTMLResponse(content=_load_template("email_not_configured_for_change.html"))
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    # FR-11: a missing csrf_token field is a client error. In v0.1.0 we do
+    # not compare against request.session["csrf_token"] (no middleware
+    # enforces it); the field is required so a future CSRFMiddleware is
+    # forward-compatible without touching this handler.
+    if not csrf_token:
+        return JSONResponse(
+            content={"error": "Missing CSRF token"}, status_code=400
+        )
+
+    return email_change_service.start_email_change(
+        user_id, current_password, new_email, confirm_new_email
+    )
+
+
+@router.get("/verify-email-change")
+async def verify_email_change_page(request: Request, token: str = ""):
+    """Consume an email-change confirmation link.
+
+    The token IS the capability (mirrors /verify, /auth/google/callback,
+    and the QR scan GET). A session is NOT required. The handler does,
+    however, read the (optional) request.session so the verifying
+    browser's session is updated to the new email address (FR-09). The
+    DB is updated either way; an unauthenticated click still promotes
+    the email and the new address takes effect on the user's next login.
+
+    VULN-3 posture: the raw token is NEVER reflected in the response
+    body, the URL bar (the server never echoes it), or any log line. The
+    _render_verify_email_change_result helper renders a fixed outcome
+    message whose placeholders are author-controlled strings only.
+    """
+    result = email_change_service.verify_email_change_token(token)
+
+    if result["status"] == "ok":
+        user = result["user"]
+        # FR-09: if the verifying browser is signed in as the same user,
+        # promote the session's email so /profile (and any other {{email}}
+        # splice) immediately reflects the new address. Other live sessions
+        # of the same user keep their old email until they re-login.
+        if request.session.get("user_id") == user["id"]:
+            request.session["email"] = user["new_email"]
+        return _render_verify_email_change_result("ok")
+
+    return _render_verify_email_change_result(result["status"])
 
 
 @router.post("/profile/2fa")
