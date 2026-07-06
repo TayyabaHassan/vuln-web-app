@@ -97,6 +97,16 @@ EMAIL_VERIFICATION_TTL_SECONDS = int(
     os.environ.get("EMAIL_VERIFICATION_TTL_SECONDS", "3600")
 )
 
+# Email-change token lifetime in seconds (Email Change with Verification feature).
+# Mirrors EMAIL_VERIFICATION_TTL_SECONDS but is intentionally independent so the
+# email-change flow can be tightened or relaxed without affecting the signup
+# verification flow. Default 1 hour; non-secret; env-tunable for demos, e.g.
+#   EMAIL_CHANGE_TTL_SECONDS=60 uv run backend/app/main.py
+# No is_*_configured() gate -- always present, like its sibling setting.
+EMAIL_CHANGE_TTL_SECONDS = int(
+    os.environ.get("EMAIL_CHANGE_TTL_SECONDS", "3600")
+)
+
 
 # --- SendGrid HTTP API (the only email transport) ----------------------------
 # Email is delivered exclusively over SendGrid's HTTPS API (port 443) via stdlib

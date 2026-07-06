@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        // Pre-paint theme init -- identical to the other templates.
+        (function () {
+            try {
+                var saved = localStorage.getItem('theme');
+                if (saved !== 'light' && saved !== 'dark') { saved = null; }
+                var theme = saved;
+                if (!theme && window.matchMedia) {
+                    theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                if (!theme) { theme = 'light'; }
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+        })();
+    </script>
+    <title>Email not configured - Security Vulnerability Lab</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body class="dashboard-body">
+    <header class="header">
+        <div class="header-title">Security Vulnerability Lab</div>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
+            <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
+        </button>
+        <div class="header-logos">
+            <img src="/static/images/PUCIT_Logo.png" alt="PUCIT" class="header-logo">
+            <img src="/static/images/excaliat-logo.png" alt="Excaliat" class="header-logo">
+            <img src="/static/images/blue-logo-scl2.png" alt="FCCU" class="header-logo">
+        </div>
+    </header>
+
+    <main class="dashboard-content">
+        <div class="profile-card">
+            <h2 class="section-title">Email delivery is not configured</h2>
+            <p class="mission-description">
+                Changing your email address requires the server to send a
+                confirmation link to the new address. This server does not
+                have email delivery set up, so the email-change feature is
+                unavailable right now.
+            </p>
+            <p class="mission-description">
+                To enable this feature, set the
+                <code>SENDGRID_API_KEY</code> and <code>SENDGRID_FROM</code>
+                environment variables (or the matching entries in a
+                git-ignored <code>.env</code> file) and restart the
+                application. See <code>core/config.py</code> for the full list
+                of supported settings.
+            </p>
+            <p class="form-link"><a href="/profile">Back to your profile</a></p>
+        </div>
+    </main>
+
+    <script>
+        (function () {
+            var toggle = document.getElementById('theme-toggle');
+            if (!toggle) return;
+            function reflect(theme) {
+                var nextAction = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+                var icon = theme === 'dark' ? '☀' : '🌙';
+                toggle.setAttribute('aria-label', nextAction);
+                var iconEl = toggle.querySelector('.theme-toggle-icon');
+                if (iconEl) iconEl.textContent = icon;
+            }
+            reflect(document.documentElement.getAttribute('data-theme') || 'light');
+            toggle.addEventListener('click', function () {
+                var current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                var next = current === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                try { localStorage.setItem('theme', next); } catch (e) { /* in-page flip still works */ }
+                reflect(next);
+            });
+        })();
+    </script>
+</body>
+</html>

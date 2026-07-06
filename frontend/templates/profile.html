@@ -89,6 +89,14 @@
             </form>
         </div>
 
+        <!-- Change Email (Email Change with Verification feature) -->
+        <div class="profile-card email-change-card">
+            <h2 class="section-title">Change Email</h2>
+            {{email_change_status}}
+            {{email_change_card}}
+            <div id="email-change-message" class="profile-message" role="status" aria-live="polite" style="display: none;"></div>
+        </div>
+
         <!-- Two-Factor Authentication (Email OTP 2FA, v1.0.6) -->
         <div class="profile-card">
             <h2 class="section-title">Two-Factor Authentication</h2>
@@ -335,6 +343,46 @@
                     }
                 } catch (err) {
                     notify('Something went wrong. Please try again.', false);
+                }
+            });
+        })();
+    </script>
+
+    <script>
+        // Email Change with Verification. The form posts urlencoded (so the
+        // hidden csrf_token field reaches the handler; the existing CSRF
+        // middleware in v1.0.4+ parses urlencoded bodies only). The success
+        // / error JSON is rendered inline in #email-change-message. After a
+        // success we reload the page so the new pending_email status line
+        // appears without a manual refresh.
+        (function () {
+            var form = document.getElementById('email-change-form');
+            var msg = document.getElementById('email-change-message');
+            if (!form || !msg) return;
+
+            function show(text, ok) {
+                msg.textContent = text;
+                msg.classList.remove('is-error', 'is-success');
+                msg.classList.add(ok ? 'is-success' : 'is-error');
+                msg.style.display = 'block';
+            }
+
+            form.addEventListener('submit', async function (e) {
+                e.preventDefault();
+                msg.style.display = 'none';
+                var body = new URLSearchParams(new FormData(form));
+                try {
+                    var res = await fetch('/profile/email/request', { method: 'POST', body: body });
+                    var data = await res.json().catch(function () { return {}; });
+                    if (data.success) {
+                        show(data.message || 'Verification email sent.', true);
+                        // Re-fetch the profile so the pending status line appears.
+                        setTimeout(function () { window.location.reload(); }, 400);
+                    } else {
+                        show(data.error || 'Could not request the email change.', false);
+                    }
+                } catch (err) {
+                    show('Something went wrong. Please try again.', false);
                 }
             });
         })();

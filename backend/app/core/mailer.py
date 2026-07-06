@@ -157,3 +157,57 @@ def send_otp_email(to_email: str, username: str, code: str) -> bool:
     if ok:
         logger.info("OTP email sent to %s", to_email)
     return ok
+
+
+def send_email_change_email(to_email: str, username: str, confirm_url: str) -> bool:
+    """Send the email-change confirmation email. Returns True on success, else False.
+
+    Same posture as send_verification_email and send_otp_email:
+    - Returns False (never raises) on every failure path (unconfigured, network,
+      non-2xx, JSON error, timeout) so the caller can roll back the pending-email
+      triple in services/email_change_service.start_email_change().
+    - The API key is never logged.
+    - The username and the confirm URL are html.escape(..., quote=True)'d before
+      they enter the HTML body (VULN-2 posture). The raw token is NEVER in
+      either the text or HTML body -- the URL is treated as one opaque string
+      and escaped wholesale; we never split on `?token=`.
+    - On success logs only "Email change confirmation sent to <to_email>".
+
+    The user is changing the email address on their EXISTING account, so this
+    email goes to the NEW address (proving the user controls it). The OLD
+    address receives nothing -- mirroring /verify signup behavior. The lab's
+    8 intentional vulnerabilities are unaffected by this slice.
+    """
+    if not config.is_email_configured():
+        logger.warning("Email not configured; skipping email-change email to %s", to_email)
+        return False
+
+    safe_username = html.escape(username or "", quote=True)
+    safe_url = html.escape(confirm_url, quote=True)
+
+    subject = "Confirm your new email - Security Vulnerability Lab"
+    text_body = (
+        f"Hi {username},\n\n"
+        "We received a request to change the email address on your Security "
+        "Vulnerability Lab account to this address. If you made this request, "
+        "open the link below within 1 hour to confirm the change. The link "
+        "can be used only once.\n\n"
+        f"{confirm_url}\n\n"
+        "If you did not request this change, you can safely ignore this email "
+        "-- your current address will stay in effect."
+    )
+    html_body = (
+        f"<p>Hi {safe_username},</p>"
+        "<p>We received a request to change the email address on your "
+        "<strong>Security Vulnerability Lab</strong> account to this address. "
+        "If you made this request, click the button below within 1 hour to "
+        "confirm the change. The link can be used only once.</p>"
+        f'<p><a href="{safe_url}">Confirm new email</a></p>'
+        "<p>If you did not request this change, you can safely ignore this "
+        "email -- your current address will stay in effect.</p>"
+    )
+
+    ok = _deliver(to_email, subject, text_body, html_body)
+    if ok:
+        logger.info("Email change confirmation sent to %s", to_email)
+    return ok

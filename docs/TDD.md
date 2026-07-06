@@ -644,6 +644,11 @@ CREATE TABLE users (
     email    TEXT,
     password TEXT  -- MD5 hash (vulnerable)
 );
+-- The Email Change with Verification feature adds three nullable columns
+-- to the users table (idempotent ALTER; no grandfather UPDATE needed):
+ALTER TABLE users ADD COLUMN pending_email TEXT;
+ALTER TABLE users ADD COLUMN pending_email_token TEXT;
+ALTER TABLE users ADD COLUMN pending_email_token_expires REAL;
 ```
 
 ### 11.4 API Endpoints
@@ -659,6 +664,13 @@ CREATE TABLE users (
 | GET | `/logout` | Terminate session | No |
 | GET | `/search` | Search users | No (vulnerable) |
 | GET | `/download/db` | Download database | No (vulnerable) |
+
+The Email Change with Verification feature (additive; not in the v0.1.0 lab baseline) adds:
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/profile/email/request` | Issue a pending email change (sends verification link to the new address) | Yes (session + `csrf_token` hidden field) |
+| GET | `/verify-email-change?token=…` | Promote `pending_email` to `email` on a valid, unexpired, unconsumed token | No (token is the capability) |
 
 ### 11.5 Deployment Requirements
 

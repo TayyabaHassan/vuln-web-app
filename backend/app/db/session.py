@@ -160,6 +160,17 @@ def init_db():
         "totp_secret": "ALTER TABLE users ADD COLUMN totp_secret TEXT",
         "totp_enabled": "ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0",
         "totp_last_step": "ALTER TABLE users ADD COLUMN totp_last_step INTEGER",
+        # Email Change with Verification feature: three nullable / no-default
+        # columns. The defaults (NULL for all three) already mean "no pending
+        # change", so -- like the lockout/otp/totp columns -- NO grandfather
+        # UPDATE is needed; existing rows are correct as-is. pending_email
+        # holds the not-yet-active address; pending_email_token stores the raw
+        # secrets.token_urlsafe(32) link; pending_email_token_expires is a Unix
+        # epoch REAL, matching the same pattern as verification_token_expires
+        # and the lockout/otp/totp timestamp columns.
+        "pending_email": "ALTER TABLE users ADD COLUMN pending_email TEXT",
+        "pending_email_token": "ALTER TABLE users ADD COLUMN pending_email_token TEXT",
+        "pending_email_token_expires": "ALTER TABLE users ADD COLUMN pending_email_token_expires REAL",
     }
     for column, ddl in migrations.items():
         if column not in existing:
