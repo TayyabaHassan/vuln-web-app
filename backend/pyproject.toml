@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Intentionally vulnerable web application for security education"
 requires-python = ">=3.9"
 dependencies = [
-    "fastapi>=0.109.0",
+    "fastapi[standard]>=0.109.0",
     "uvicorn>=0.27.0",
     "python-multipart>=0.0.6",
     "itsdangerous>=2.0.0",
