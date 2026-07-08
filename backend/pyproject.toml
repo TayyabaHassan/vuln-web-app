@@ -23,3 +23,6 @@ packages = ["app"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+[tool.vercel]
+entrypoint = "backend.app.main:app"
